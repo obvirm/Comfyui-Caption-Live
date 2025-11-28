@@ -60,6 +60,9 @@ fn render_mask(
     style: String,
     highlight_color: String,
     text_color: String,
+    pos_x: f64,
+    pos_y: f64,
+    font_size_px: f64, 
 ) -> PyResult<Vec<u8>> {
     
     // 1. Load Font
@@ -85,30 +88,31 @@ fn render_mask(
     let measurer = RusttypeMeasurer { font: &font };
     let engine = LayoutEngine::new(&all_words, &measurer);
     
-    // Fixed Resolution Logic (Billboard Rule)
-    let design_width = 1080.0;
-    let design_height = 1920.0;
-    let scale_factor = width as f64 / design_width;
+    // Layout Logic (Matching WASM v2)
+    // Use actual pixel dimensions without arbitrary scaling
+    let w_f64 = width as f64;
+    let h_f64 = height as f64;
     
-    // Layout Container (Fixed 1080p)
-    // User requested: side_margin = 40.0, y = 60%, h = 30%
-    let side_margin = 40.0;
+    let side_margin = 20.0;
+    let container_h = h_f64 * 0.80; // 80% height
+    
     let container = Rect {
-        x: side_margin,
-        y: design_height * 0.60,
-        w: design_width - (side_margin * 2.0),
-        h: design_height * 0.30,
+        x: side_margin + pos_x,
+        y: ((h_f64 - container_h) / 2.0) + pos_y,
+        w: w_f64 - (side_margin * 2.0),
+        h: container_h,
     };
     
+    // Fixed font size requested by user
     let settings = LayoutSettings {
         container,
-        min_font_size: 40.0,
-        max_font_size: 90.0,
+        min_font_size: font_size_px,
+        max_font_size: font_size_px,
         padding: 10.0,
     };
     
     let layout = engine.calculate_best_fit(settings);
-    let font_size = layout.font_size;
+    let font_size = layout.font_size; // Should be equal to font_size_px
     
     // 4. Determine Active Word
     let mut active_idx = None;
@@ -143,10 +147,9 @@ fn render_mask(
         }
         let word = &all_words[item.word_index];
         
-        let x = (item.rect.x * scale_factor) as i32;
-        let y = (item.rect.y * scale_factor) as i32;
-        let scaled_font_size = (font_size * scale_factor) as f32;
-        let scaled_scale = Scale::uniform(scaled_font_size);
+        let x = item.rect.x as i32;
+        let y = item.rect.y as i32;
+        let scaled_scale = Scale::uniform(font_size as f32);
 
         draw_text_mut(&mut image, passive_color, x, y, scaled_scale, &font, &word.text);
     }
@@ -159,7 +162,7 @@ fn render_mask(
             
             let box_padding = font_size * 0.2;
             let box_h = font_size * 1.1;
-            let box_radius = 12.0;
+            let box_radius = box_h * 0.2; // Dynamic radius
 
             let target_rect = Rect {
                 x: target_item.rect.x - box_padding,
@@ -192,22 +195,13 @@ fn render_mask(
                 }
             }
 
-            // Draw Box (Scaled)
-            let scaled_box = Rect {
-                x: box_rect.x * scale_factor,
-                y: box_rect.y * scale_factor,
-                w: box_rect.w * scale_factor,
-                h: box_rect.h * scale_factor,
-            };
-            let scaled_radius = box_radius * scale_factor;
-            
-            draw_rounded_rect_mut(&mut image, scaled_box, scaled_radius, col_box);
+            // Draw Box
+            draw_rounded_rect_mut(&mut image, box_rect, box_radius, col_box);
             
             // Draw Active Word
-            let x = (target_item.rect.x * scale_factor) as i32;
-            let y = (target_item.rect.y * scale_factor) as i32;
-            let scaled_font_size = (font_size * scale_factor) as f32;
-            let scaled_scale = Scale::uniform(scaled_font_size);
+            let x = target_item.rect.x as i32;
+            let y = target_item.rect.y as i32;
+            let scaled_scale = Scale::uniform(font_size as f32);
             
             draw_text_mut(&mut image, col_white, x, y, scaled_scale, &font, &word.text);
 
@@ -216,15 +210,14 @@ fn render_mask(
             let item = &layout.words[idx];
             let word = &all_words[item.word_index];
             
-            let x = (item.rect.x * scale_factor) as i32;
-            let y = (item.rect.y * scale_factor) as i32;
+            let x = item.rect.x as i32;
+            let y = item.rect.y as i32;
             
-            let scaled_font_size = (font_size * scale_factor) as f32;
             let effect_scale = if style == "scaling" { 1.25 } else { 1.1 };
-            let final_scale = Scale::uniform(scaled_font_size * effect_scale);
+            let final_scale = Scale::uniform((font_size * effect_scale) as f32);
             
-            let (w_orig, h_orig) = measurer.measure_text(&word.text, scaled_font_size as f64);
-            let (w_new, h_new) = measurer.measure_text(&word.text, scaled_font_size as f64 * effect_scale as f64);
+            let (w_orig, h_orig) = measurer.measure_text(&word.text, font_size);
+            let (w_new, h_new) = measurer.measure_text(&word.text, font_size * effect_scale);
             let offset_x = (w_new - w_orig) / 2.0;
             let offset_y = (h_new - h_orig) / 2.0;
             
@@ -232,7 +225,7 @@ fn render_mask(
             let draw_y = y - offset_y as i32;
 
             // Stroke
-            let stroke_dist = (scaled_font_size * 0.05).ceil() as i32;
+            let stroke_dist = (font_size * 0.05).ceil() as i32;
             for oy in -stroke_dist..=stroke_dist {
                 for ox in -stroke_dist..=stroke_dist {
                     if ox == 0 && oy == 0 { continue; }

@@ -25,6 +25,9 @@ class CaptionLiveNode:
                 "highlight_color": ("STRING", {"default": "#39E55F"}),
                 "text_color": ("STRING", {"default": "#FFFFFF"}),
                 "font_path": ("STRING", {"default": "arial.ttf"}),
+                "aspect_ratio": (["16:9", "9:16", "1:1", "4:3", "3:4", "21:9", "Custom"], {"default": "16:9"}),
+                "pos_x": ("INT", {"default": 0, "min": -2000, "max": 2000}),
+                "pos_y": ("INT", {"default": 0, "min": -2000, "max": 2000}),
                 "style": (["box", "colored", "scaling"], {"default": "box"}),
             },
             "optional": {
@@ -36,7 +39,7 @@ class CaptionLiveNode:
     FUNCTION = "render"
     CATEGORY = "caption-live"
 
-    def render(self, images, segments, fps, font_size, highlight_color, text_color, font_path, style, mask_optional=None):
+    def render(self, images, segments, fps, font_size, highlight_color, text_color, font_path, aspect_ratio, pos_x, pos_y, style, mask_optional=None):
         if rust_caption is None:
             print("CaptionLive Error: Rust backend not loaded. Returning original images.")
             return (images,)
@@ -77,11 +80,14 @@ class CaptionLiveNode:
                     int(images.shape[2]),  # width
                     int(images.shape[1]),  # height
                     time,
-                    style,
+                    fps,  # Add fps if missing in previous call or ensure it matches rust signature
                     str(font_path),
-                    float(font_size),
+                    style,
+                    str(highlight_color),
                     str(text_color),
-                    str(highlight_color)
+                    float(pos_x),
+                    float(pos_y),
+                    float(font_size)
                 )
                 
                 # Convert bytes to tensor (H, W, 4)

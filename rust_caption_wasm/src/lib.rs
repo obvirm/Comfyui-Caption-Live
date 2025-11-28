@@ -51,6 +51,10 @@ impl CaptionEngine {
     }
 
     fn path_round_rect(&self, ctx: &CanvasRenderingContext2d, x: f64, y: f64, w: f64, h: f64, r: f64) {
+        // Clamp radius to prevent artifacts when box is small
+        let max_r = (w.min(h)) / 2.0;
+        let r = r.min(max_r).max(0.0);
+
         ctx.begin_path();
         let _ = ctx.move_to(x + r, y);
         let _ = ctx.line_to(x + w - r, y);
@@ -64,7 +68,7 @@ impl CaptionEngine {
         ctx.close_path();
     }
 
-    pub fn draw_frame(&self, ctx: &CanvasRenderingContext2d, width: f64, height: f64, time: f64, style: &str) {
+    pub fn draw_frame(&self, ctx: &CanvasRenderingContext2d, width: f64, height: f64, time: f64, style: &str, font_size_px: f64, pos_x: f64, pos_y: f64) {
         // Fill with black background
         ctx.set_fill_style(&JsValue::from_str("#000000"));
         ctx.fill_rect(0.0, 0.0, width, height);
@@ -72,12 +76,11 @@ impl CaptionEngine {
         // NO LETTERBOXING - stretch content to fill entire canvas
         // Use actual canvas dimensions for layout
         let side_margin = 20.0;
-        let bottom_offset = height * 0.10;
-        let container_h = height * 0.30;
+        let container_h = height * 0.80; // Use 80% of height to allow large text
         
         let container = Rect {
-            x: side_margin,
-            y: height - container_h - bottom_offset, 
+            x: side_margin + pos_x,
+            y: ((height - container_h) / 2.0) + pos_y, 
             w: width - (side_margin * 2.0), 
             h: container_h, 
         };
@@ -85,12 +88,11 @@ impl CaptionEngine {
         let measurer = CanvasMeasurer { ctx };
         let engine = LayoutEngine::new(&self.words, &measurer);
         
-        // Dynamic font size based on canvas size
-        let base_size = (width + height) / 30.0;
+        // Fixed font size based on user input (scaled by DPR in JS)
         let settings = LayoutSettings {
             container,
-            min_font_size: base_size * 0.5,
-            max_font_size: base_size * 1.5,
+            min_font_size: font_size_px,
+            max_font_size: font_size_px,
             padding: 10.0,
         };
         
@@ -117,7 +119,7 @@ impl CaptionEngine {
         }
 
         // Passive text
-        ctx.set_fill_style(&JsValue::from_str("black"));
+        ctx.set_fill_style(&JsValue::from_str("white"));
         if style == "colored" || style == "scaling" {
              ctx.set_fill_style(&JsValue::from_str("white")); 
         }
@@ -140,7 +142,9 @@ impl CaptionEngine {
                 
                 let box_padding = font_size * 0.2;
                 let box_h = font_size * 1.1;
-                let box_radius = 12.0;
+                
+                // Dynamic radius relative to box size
+                let box_radius = box_h * 0.2; 
 
                 let target_rect = Rect {
                     x: target_item.rect.x - box_padding,

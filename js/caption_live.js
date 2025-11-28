@@ -64,6 +64,18 @@ app.registerExtension({
                     hideOnZoom: false
                 });
 
+                // --- Auto-Resize on Ratio Change ---
+                const ratioWidget = this.widgets?.find(w => w.name === "aspect_ratio");
+                if (ratioWidget) {
+                    ratioWidget.callback = (value) => {
+                        // Trigger resize logic to snap to new ratio immediately
+                        if (this.onResize && this.size) {
+                            this.onResize(this.size);
+                        }
+                        app.graph.setDirtyCanvas(true, true);
+                    };
+                }
+
                 // --- Render Loop ---
                 let engine = null;
                 let lastSegments = "";
@@ -72,13 +84,39 @@ app.registerExtension({
                 const ctx = canvas.getContext("2d");
 
                 const render = () => {
-                    if (!canvas.isConnected) return;
+                    // Keep loop alive even if not connected yet (crucial for page reloads)
+                    if (!canvas.isConnected) {
+                        animationFrameId = requestAnimationFrame(render);
+                        return;
+                    }
 
                     const segmentsWidget = this.widgets?.find(w => w.name === "segments");
                     const styleWidget = this.widgets?.find(w => w.name === "style");
+                    const fontSizeWidget = this.widgets?.find(w => w.name === "font_size");
+                    const posXWidget = this.widgets?.find(w => w.name === "pos_x");
+                    const posYWidget = this.widgets?.find(w => w.name === "pos_y");
 
-                    const segmentsStr = segmentsWidget ? segmentsWidget.value : "[]";
+                    let segmentsStr = segmentsWidget ? segmentsWidget.value : "[]";
                     const style = styleWidget ? styleWidget.value : "box";
+                    const fontSizeRaw = fontSizeWidget ? fontSizeWidget.value : 56.0;
+                    const posXRaw = posXWidget ? posXWidget.value : 0;
+                    const posYRaw = posYWidget ? posYWidget.value : 0;
+
+                    // Sanitize JSON input for WASM
+                    try {
+                        // 1. Replace single quotes with double quotes (common user/LLM error)
+                        segmentsStr = segmentsStr.replace(/'/g, '"');
+                        
+                        // 2. Extract the JSON array part if there's surrounding text
+                        const firstOpen = segmentsStr.indexOf("[");
+                        const lastClose = segmentsStr.lastIndexOf("]");
+                        
+                        if (firstOpen !== -1 && lastClose !== -1 && lastClose > firstOpen) {
+                            segmentsStr = segmentsStr.substring(firstOpen, lastClose + 1);
+                        }
+                    } catch (e) {
+                        // If sanitization fails, pass original string and let engine handle/fail
+                    }
 
                     if (segmentsStr !== lastSegments && CaptionEngine) {
                         try {
@@ -89,17 +127,52 @@ app.registerExtension({
                         }
                     }
 
-                    const rect = container.getBoundingClientRect();
-                    const dpr = window.devicePixelRatio || 1;
+                    // --- STABLE RENDERING LOGIC (Smart Zoom + Supersampling) ---
+                    // "Ubah size jadi koordinat z" interpretation:
+                    // We use the Node's Logical Size (stable) but multiply by the Zoom Level (Z-coord/scale)
+                    // to determine the resolution.
+                    // ADDED: * 2.0 for Supersampling to make it ultra-sharp ("tajam").
+                    const zoom = app.canvas.ds.scale || 1;
+                    const dpr = (window.devicePixelRatio || 1) * zoom * 2.0;
+                    
+                    // Width: Node Width - Margins (approx 6px total)
+                    const logicalWidth = (this.size ? this.size[0] : 200) - 6;
+                    
+                    // Height: Parse from the container style set by onResize/onDrawForeground
+                    let logicalHeight = 200;
+                    if (container.style.height) {
+                        logicalHeight = parseFloat(container.style.height);
+                    }
 
-                    if (canvas.width !== rect.width * dpr || canvas.height !== rect.height * dpr) {
-                        canvas.width = rect.width * dpr;
-                        canvas.height = rect.height * dpr;
+                    // Lock internal resolution to Logical Size * DPR
+                    const targetWidth = Math.round(logicalWidth * dpr);
+                    const targetHeight = Math.round(logicalHeight * dpr);
+
+                    if (canvas.width !== targetWidth || canvas.height !== targetHeight) {
+                        canvas.width = targetWidth;
+                        canvas.height = targetHeight;
                     }
 
                     if (engine) {
-                        const time = (Date.now() / 1000) % 10.0;
-                        engine.draw_frame(ctx, canvas.width, canvas.height, time, style);
+                        // Skip render if canvas is too small
+                        if (canvas.width > 50 && canvas.height > 50) {
+                            try {
+                                const time = (Date.now() / 1000) % 10.0;
+                                
+                                // Calculate pixel font size based on zoom/DPI
+                                // We multiply by app.canvas.ds.scale (zoom level) to keep text proportional to the node
+                                const zoomLevel = app.canvas.ds.scale || 1;
+                                const targetFontSizePx = fontSizeRaw * dpr;
+                                
+                                // Position offsets (also scaled by DPR to match canvas coordinates)
+                                const targetPosX = posXRaw * dpr;
+                                const targetPosY = posYRaw * dpr;
+
+                                engine.draw_frame(ctx, canvas.width, canvas.height, time, style, targetFontSizePx, targetPosX, targetPosY);
+                            } catch (e) {
+                                console.warn("CaptionLive Render Error:", e);
+                            }
+                        }
                     }
 
                     animationFrameId = requestAnimationFrame(render);
@@ -116,6 +189,16 @@ app.registerExtension({
                 return r;
             };
 
+            // --- Helper: Parse Aspect Ratio ---
+            const getAspectRatio = (str) => {
+                if (!str || str === "Custom") return null;
+                const parts = str.split(":");
+                if (parts.length === 2) {
+                    return parseFloat(parts[0]) / parseFloat(parts[1]);
+                }
+                return null;
+            };
+
             // --- Responsive Resizing Logic ---
             const onResize = nodeType.prototype.onResize;
             nodeType.prototype.onResize = function (size) {
@@ -126,6 +209,8 @@ app.registerExtension({
                 if (!this.widgets) return;
 
                 const previewWidget = this.widgets.find(w => w.name === "preview");
+                const ratioWidget = this.widgets.find(w => w.name === "aspect_ratio");
+                
                 if (!previewWidget) return;
 
                 // 1. Calculate height needed for inputs (excluding preview)
@@ -138,16 +223,30 @@ app.registerExtension({
                     this.widgets.splice(prevIndex, 0, previewWidget);
                 }
 
-                // 2. Sizing Constants
-                const minPreviewHeight = 200; 
-                const padding = 20;
-                const targetTotalHeight = inputsHeight + minPreviewHeight + padding;
+                // 2. Determine Target Height
+                const padding = 25;
+                let targetPreviewHeight = 200; // Default min
+                const targetRatio = ratioWidget ? getAspectRatio(ratioWidget.value) : null;
 
-                // 3. Auto-grow if too small
-                if (size[1] < targetTotalHeight) {
-                    this.setSize([size[0], targetTotalHeight]);
+                if (targetRatio) {
+                    // Fixed Aspect Ratio Mode
+                    // Width of the widget is roughly Node Width - (Margin * 2)
+                    // We assume margin is around 6px total (3px each side)
+                    const widgetWidth = size[0] - 6; 
+                    targetPreviewHeight = widgetWidth / targetRatio;
+                } else {
+                    // Custom/Fill Mode
+                    const availableSpace = size[1] - inputsHeight - padding;
+                    targetPreviewHeight = Math.max(200, availableSpace);
                 }
-                // Note: Actual style height is now handled in onDrawForeground for accuracy
+
+                const targetTotalHeight = inputsHeight + targetPreviewHeight + padding;
+
+                // 3. Auto-grow or Auto-shrink (if fixed ratio)
+                // Only resize node if the difference is significant to avoid loop
+                if (Math.abs(size[1] - targetTotalHeight) > 5) {
+                     this.setSize([size[0], targetTotalHeight]);
+                }
             };
 
             // --- Layout Sync ---
@@ -160,18 +259,28 @@ app.registerExtension({
                 if (this.flags.collapsed) return;
 
                 const previewWidget = this.widgets?.find(w => w.name === "preview");
+                const ratioWidget = this.widgets?.find(w => w.name === "aspect_ratio");
+
                 if (previewWidget && previewWidget.element) {
-                    // last_y is updated by LiteGraph during the draw phase
                     const widgetY = previewWidget.last_y;
                     
                     if (widgetY !== undefined) {
-                        const padding = 25; // Increased space for bottom border
-                        let height = this.size[1] - widgetY - padding;
+                        let height = 0;
+                        const targetRatio = ratioWidget ? getAspectRatio(ratioWidget.value) : null;
+
+                        if (targetRatio) {
+                            // Force height based on width and ratio
+                            const widgetWidth = this.size[0] - 6; // Approximate width
+                            height = widgetWidth / targetRatio;
+                        } else {
+                            // Fill remaining space
+                            const padding = 25; 
+                            height = this.size[1] - widgetY - padding;
+                        }
                         
                         // Prevent negative height
                         if (height < 0) height = 0;
                         
-                        // Update the DOM element height to match the visual layout
                         previewWidget.element.style.height = height + "px";
                     }
                 }
