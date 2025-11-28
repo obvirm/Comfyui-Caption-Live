@@ -96,27 +96,19 @@ impl CaptionEngine {
             padding: 10.0,
         };
         
+        
         let layout = engine.calculate_best_fit(settings);
         let font_size = layout.font_size;
         
         ctx.set_font(&format!("900 {}px Inter, Arial, sans-serif", font_size));
         ctx.set_text_align("left");
-        ctx.set_text_baseline("middle");
+        ctx.set_text_baseline("top"); 
         ctx.set_line_join("round");
         ctx.set_line_cap("round");
 
         // Animation state
-        let mut active_idx = None;
-        for (i, item) in layout.words.iter().enumerate() {
-            let word = &self.words[item.word_index];
-            if time >= word.start && time < word.end {
-                active_idx = Some(i);
-                break;
-            }
-        }
-        if active_idx.is_none() && !self.words.is_empty() && time >= self.words.last().unwrap().end {
-             active_idx = Some(layout.words.len() - 1);
-        }
+        let frame_state = engine.calculate_frame(&layout, time);
+        let active_idx = frame_state.active_word_index;
 
         // Passive text
         ctx.set_fill_style(&JsValue::from_str("white"));
@@ -140,64 +132,33 @@ impl CaptionEngine {
                 let target_item = &layout.words[idx];
                 let word = &self.words[target_item.word_index];
                 
-                let box_padding = font_size * 0.2;
-                let box_h = font_size * 1.1;
-                
-                // Dynamic radius relative to box size
-                let box_radius = box_h * 0.2; 
+                if let Some(box_rect) = frame_state.box_rect {
+                    let box_h = box_rect.h;
+                    // Dynamic radius relative to box size (20%)
+                    let box_radius = box_h * 0.2; 
 
-                let target_rect = Rect {
-                    x: target_item.rect.x - box_padding,
-                    y: target_item.rect.y - (box_h / 2.0),
-                    w: target_item.rect.w + (box_padding * 2.0),
-                    h: box_h,
-                };
+                    ctx.set_fill_style(&JsValue::from_str("#007AFF"));
+                    self.path_round_rect(ctx, box_rect.x, box_rect.y, box_rect.w, box_rect.h, box_radius);
+                    ctx.fill();
 
-                let mut box_rect = target_rect;
+                    let _ = ctx.save();
+                    self.path_round_rect(ctx, box_rect.x, box_rect.y, box_rect.w, box_rect.h, box_radius);
+                    ctx.clip();
 
-                if idx > 0 {
-                    let prev_item = &layout.words[idx - 1];
-                    let transition_duration = 0.25;
-                    let time_into_word = time - word.start;
-
-                    if time_into_word < transition_duration {
-                        let prev_rect = Rect {
-                            x: prev_item.rect.x - box_padding,
-                            y: prev_item.rect.y - (box_h / 2.0),
-                            w: prev_item.rect.w + (box_padding * 2.0),
-                            h: box_h,
+                    ctx.set_fill_style(&JsValue::from_str("white"));
+                    for item in &layout.words {
+                        let word = &self.words[item.word_index];
+                        let item_box = Rect { 
+                            x: item.rect.x, y: item.rect.y - font_size, 
+                            w: item.rect.w, h: font_size * 2.0 
                         };
-
-                        if (prev_rect.y - target_rect.y).abs() > 1.0 {
-                            box_rect = target_rect;
-                        } else {
-                            let t = (time_into_word / transition_duration).clamp(0.0, 1.0);
-                            box_rect = interpolate_rect(prev_rect, target_rect, t);
-                        }
+                        if item_box.x < box_rect.x + box_rect.w && item_box.x + item_box.w > box_rect.x &&
+                           item_box.y < box_rect.y + box_rect.h && item_box.y + item_box.h > box_rect.y {
+                               let _ = ctx.fill_text(&word.text, item.rect.x, item.rect.y);
+                           }
                     }
+                    let _ = ctx.restore();
                 }
-
-                ctx.set_fill_style(&JsValue::from_str("#007AFF"));
-                self.path_round_rect(ctx, box_rect.x, box_rect.y, box_rect.w, box_rect.h, box_radius);
-                ctx.fill();
-
-                let _ = ctx.save();
-                self.path_round_rect(ctx, box_rect.x, box_rect.y, box_rect.w, box_rect.h, box_radius);
-                ctx.clip();
-
-                ctx.set_fill_style(&JsValue::from_str("white"));
-                for item in &layout.words {
-                    let word = &self.words[item.word_index];
-                    let item_box = Rect { 
-                        x: item.rect.x, y: item.rect.y - font_size, 
-                        w: item.rect.w, h: font_size * 2.0 
-                    };
-                    if item_box.x < box_rect.x + box_rect.w && item_box.x + item_box.w > box_rect.x &&
-                       item_box.y < box_rect.y + box_rect.h && item_box.y + item_box.h > box_rect.y {
-                           let _ = ctx.fill_text(&word.text, item.rect.x, item.rect.y);
-                       }
-                }
-                let _ = ctx.restore();
 
             } else {
                 let item = &layout.words[idx];

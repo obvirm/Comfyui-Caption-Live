@@ -4,11 +4,10 @@ import json
 import ast
 import re
 
-try:
-    import rust_caption
-except ImportError:
-    print("CaptionLive Error: 'rust_caption' module not found. Please compile the Rust extension.")
-    rust_caption = None
+import os
+import sys
+
+rust_caption = None
 
 class CaptionLiveNode:
     @classmethod
@@ -40,27 +39,47 @@ class CaptionLiveNode:
     CATEGORY = "caption-live"
 
     def render(self, images, segments, fps, font_size, highlight_color, text_color, font_path, aspect_ratio, pos_x, pos_y, style, mask_optional=None):
+        global rust_caption
+        
+        # Lazy Import
         if rust_caption is None:
-            print("CaptionLive Error: Rust backend not loaded. Returning original images.")
-            return (images,)
+            try:
+                # Ensure current dir is in path for local import
+                current_dir = os.path.dirname(__file__)
+                if current_dir not in sys.path:
+                    sys.path.append(current_dir)
+                    
+                import rust_caption_v2 as rc
+                rust_caption = rc
+                print("CaptionLive: Rust backend loaded successfully.")
+            except ImportError as e:
+                print(f"CaptionLive CRITICAL ERROR: Failed to import 'rust_caption_v2'. Details: {e}")
+                import platform
+                print(f"Debug Info: Python {sys.version}, Platform {platform.platform()}")
+                return (images,)
+        
+        # Resolve Font Path
+        if not os.path.exists(font_path):
+            node_dir = os.path.dirname(__file__)
+            local_font = os.path.join(node_dir, font_path)
+            if os.path.exists(local_font):
+                font_path = local_font
+            elif os.name == 'nt':
+                win_font = os.path.join("C:\\Windows\\Fonts", font_path)
+                if os.path.exists(win_font):
+                    font_path = win_font
         
         # Parse Segments
         try:
-            # Fix common JSON errors from LLM output
             fixed_segments = segments.replace("'", '"')
-            # Remove trailing commas in arrays/objects
             fixed_segments = re.sub(r',(\s*[}\]])', r'\1', fixed_segments)
-            
             segments_data = json.loads(fixed_segments)
-            
-            # Handle Whisper format {"segments": [...]}
             if isinstance(segments_data, dict) and "segments" in segments_data:
                 segments_json = json.dumps(segments_data["segments"])
-            # Handle list format
             elif isinstance(segments_data, list):
                 segments_json = fixed_segments
             else:
-                print("CaptionLive Warning: Invalid JSON structure (must be list or dict with 'segments')")
+                print("CaptionLive Warning: Invalid JSON structure")
                 return (images,)
         except Exception as e:
             print(f"CaptionLive JSON Parse Error: {e}")
@@ -68,8 +87,19 @@ class CaptionLiveNode:
         
         # Clone output
         output_images = images.clone()
+        width = int(images.shape[2])
+        height = int(images.shape[1])
         
-        # Pre-calculate timestamps for the batch
+        # Auto-Scale Logic (Match visual proportion across resolutions)
+        # Baseline: 512px width (common preview size approximation)
+        baseline_width = 512.0
+        scale_factor = width / baseline_width
+        
+        scaled_font_size = float(font_size) * scale_factor
+        scaled_pos_x = float(pos_x) * scale_factor
+        scaled_pos_y = float(pos_y) * scale_factor
+        
+        # Pre-calculate timestamps
         for i in range(images.shape[0]):
             try:
                 time = i / fps
@@ -77,35 +107,37 @@ class CaptionLiveNode:
                 # Returns Vec<u8> (RGBA bytes)
                 rgba_bytes = rust_caption.render_mask(
                     segments_json,
-                    int(images.shape[2]),  # width
-                    int(images.shape[1]),  # height
+                    width,
+                    height,
                     time,
-                    fps,  # Add fps if missing in previous call or ensure it matches rust signature
+                    fps,
                     str(font_path),
                     style,
                     str(highlight_color),
                     str(text_color),
-                    float(pos_x),
-                    float(pos_y),
-                    float(font_size)
+                    scaled_pos_x,
+                    scaled_pos_y,
+                    scaled_font_size
                 )
                 
-                # Convert bytes to tensor (H, W, 4)
-                rgba_tensor = torch.from_numpy(np.frombuffer(rgba_bytes, dtype=np.uint8).reshape(images.shape[1], images.shape[2], 4))
+                # Convert list/bytes to tensor (H, W, 4)
+                if isinstance(rgba_bytes, list):
+                    rgba_np = np.array(rgba_bytes, dtype=np.uint8)
+                else:
+                    rgba_np = np.frombuffer(rgba_bytes, dtype=np.uint8)
+                    
+                rgba_tensor = torch.from_numpy(rgba_np.reshape(height, width, 4))
                 rgba_tensor = rgba_tensor.to(output_images.device)
                 
                 # Alpha Blending
-                alpha = rgba_tensor[:, :, 3:4].float() / 255.0  # (H, W, 1)
-                overlay_rgb = rgba_tensor[:, :, 0:3].float() / 255.0  # (H, W, 3)
-                
-                # Dest: output_images[i] (Background)
-                background_rgb = output_images[i]  # (H, W, 3)
+                alpha = rgba_tensor[:, :, 3:4].float() / 255.0
+                overlay_rgb = rgba_tensor[:, :, 0:3].float() / 255.0
+                background_rgb = output_images[i]
                 
                 blended = overlay_rgb * alpha + background_rgb * (1.0 - alpha)
                 output_images[i] = blended
             except Exception as e:
                 if i == 0: print(f"Rust Render Error: {e}")
-                # Continue loop to at least return original images for other frames
         
         return (output_images,)
 

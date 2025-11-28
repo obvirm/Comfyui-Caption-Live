@@ -112,20 +112,11 @@ fn render_mask(
     };
     
     let layout = engine.calculate_best_fit(settings);
-    let font_size = layout.font_size; // Should be equal to font_size_px
+    let font_size = layout.font_size;
     
-    // 4. Determine Active Word
-    let mut active_idx = None;
-    for (i, item) in layout.words.iter().enumerate() {
-        let word = &all_words[item.word_index];
-        if time >= word.start && time < word.end {
-            active_idx = Some(i);
-            break;
-        }
-    }
-    if active_idx.is_none() && !all_words.is_empty() && time >= all_words.last().unwrap().end {
-         active_idx = Some(layout.words.len() - 1);
-    }
+    // 4. Calculate Frame State (Animation & Active Word)
+    let frame_state = engine.calculate_frame(&layout, time);
+    let active_idx = frame_state.active_word_index;
 
     // 5. Render to Image
     let mut image = RgbaImage::new(width, height);
@@ -137,7 +128,8 @@ fn render_mask(
     let col_black = Rgba([0, 0, 0, 255]);
 
     // A. Draw Passive Text
-    let passive_color = if style == "colored" || style == "scaling" { col_white } else { col_black };
+    // Use user-defined text_color for passive text instead of hardcoded black/white
+    let passive_color = col_text; 
     
     for (i, item) in layout.words.iter().enumerate() {
         if let Some(active) = active_idx {
@@ -160,43 +152,13 @@ fn render_mask(
             let target_item = &layout.words[idx];
             let word = &all_words[target_item.word_index];
             
-            let box_padding = font_size * 0.2;
-            let box_h = font_size * 1.1;
-            let box_radius = box_h * 0.2; // Dynamic radius
-
-            let target_rect = Rect {
-                x: target_item.rect.x - box_padding,
-                y: target_item.rect.y - (box_h / 2.0),
-                w: target_item.rect.w + (box_padding * 2.0),
-                h: box_h,
-            };
-
-            let mut box_rect = target_rect;
-
-            if idx > 0 {
-                let prev_item = &layout.words[idx - 1];
-                let transition_duration = 0.25;
-                let time_into_word = time - word.start;
-
-                if time_into_word < transition_duration {
-                    let prev_rect = Rect {
-                        x: prev_item.rect.x - box_padding,
-                        y: prev_item.rect.y - (box_h / 2.0),
-                        w: prev_item.rect.w + (box_padding * 2.0),
-                        h: box_h,
-                    };
-
-                    if (prev_rect.y - target_rect.y).abs() > 1.0 {
-                        box_rect = target_rect;
-                    } else {
-                        let t = (time_into_word / transition_duration).clamp(0.0, 1.0);
-                        box_rect = interpolate_rect(prev_rect, target_rect, t);
-                    }
-                }
+            // Use calculated box rect from core engine
+            if let Some(box_rect) = frame_state.box_rect {
+                let box_h = box_rect.h;
+                let box_radius = box_h * 0.2; // Dynamic radius
+                
+                draw_rounded_rect_mut(&mut image, box_rect, box_radius, col_box);
             }
-
-            // Draw Box
-            draw_rounded_rect_mut(&mut image, box_rect, box_radius, col_box);
             
             // Draw Active Word
             let x = target_item.rect.x as i32;
@@ -242,7 +204,7 @@ fn render_mask(
 }
 
 #[pymodule]
-fn rust_caption(m: &Bound<'_, PyModule>) -> PyResult<()> {
+fn rust_caption_v2(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(render_mask, m)?)?;
     Ok(())
 }

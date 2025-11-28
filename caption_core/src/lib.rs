@@ -190,4 +190,79 @@ impl<'a, M: TextMeasurer> LayoutEngine<'a, M> {
             })
         })
     }
+
+    pub fn calculate_frame(&self, layout: &LayoutResult, time: f64) -> FrameState {
+        let mut active_idx = None;
+        
+        // Find active word
+        for (i, item) in layout.words.iter().enumerate() {
+            let word = &self.words[item.word_index];
+            if time >= word.start && time < word.end {
+                active_idx = Some(i);
+                break;
+            }
+        }
+        // Hold last word
+        if active_idx.is_none() && !self.words.is_empty() && time >= self.words.last().unwrap().end {
+             active_idx = Some(layout.words.len() - 1);
+        }
+
+        let mut box_rect = None;
+
+        if let Some(idx) = active_idx {
+            let font_size = layout.font_size;
+            let target_item = &layout.words[idx];
+            let word = &self.words[target_item.word_index];
+            
+            let box_padding = font_size * 0.2;
+            let box_h = font_size * 1.4;
+            let visual_offset_y = font_size * 0.05;
+
+            // Center box vertically on text middle
+            let target_rect = Rect {
+                x: target_item.rect.x - box_padding,
+                y: (target_item.rect.y + target_item.rect.h / 2.0) - (box_h / 2.0) + visual_offset_y,
+                w: target_item.rect.w + (box_padding * 2.0),
+                h: box_h,
+            };
+
+            let mut current_rect = target_rect;
+
+            // Animation Logic
+            if idx > 0 {
+                let prev_item = &layout.words[idx - 1];
+                let transition_duration = 0.25;
+                let time_into_word = time - word.start;
+
+                if time_into_word < transition_duration {
+                    let prev_rect = Rect {
+                        x: prev_item.rect.x - box_padding,
+                        y: (prev_item.rect.y + prev_item.rect.h / 2.0) - (box_h / 2.0) + visual_offset_y,
+                        w: prev_item.rect.w + (box_padding * 2.0),
+                        h: box_h,
+                    };
+
+                    if (prev_rect.y - target_rect.y).abs() > 1.0 {
+                        current_rect = target_rect;
+                    } else {
+                        let t = (time_into_word / transition_duration).clamp(0.0, 1.0);
+                        current_rect = interpolate_rect(prev_rect, target_rect, t);
+                    }
+                }
+            }
+            
+            box_rect = Some(current_rect);
+        }
+
+        FrameState {
+            active_word_index: active_idx,
+            box_rect,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct FrameState {
+    pub active_word_index: Option<usize>,
+    pub box_rect: Option<Rect>,
 }
