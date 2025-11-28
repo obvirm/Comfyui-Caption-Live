@@ -1,0 +1,1 @@
+E:\Ai\ComfyUI\ComfyUI\custom_nodes\caption-live\rust_caption_wasm\target\wasm32-unknown-unknown\release\caption_live_wasm.wasm: E:\Ai\ComfyUI\ComfyUI\custom_nodes\caption-live\caption_core\src\lib.rs E:\Ai\ComfyUI\ComfyUI\custom_nodes\caption-live\rust_caption_wasm\src\lib.rs
