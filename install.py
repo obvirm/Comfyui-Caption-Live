@@ -57,7 +57,7 @@ def download_wheel(repo, version, py_tag, platform_tag):
 def main():
     print("### Caption Live (Rust) Installer ###")
     
-    rust_dir = os.path.join(os.path.dirname(__file__), "rust_caption")
+    rust_dir = os.path.join(os.path.dirname(__file__), "rust_caption_src")
     
     # 1. Try Download Wheel
     platform_tag = get_platform_tag()

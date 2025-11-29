@@ -94,7 +94,7 @@ impl<'a, M: TextMeasurer> LayoutEngine<'a, M> {
         let container = settings.container;
         let padding = settings.padding;
         
-        let space_width = self.measurer.measure_text(" ", font_size).0;
+        let space_width = font_size * 0.3;
         let line_height = font_size * 1.3;
         
         let max_w = container.w - (padding * 2.0);
@@ -217,9 +217,9 @@ impl<'a, M: TextMeasurer> LayoutEngine<'a, M> {
             let target_item = &layout.words[idx];
             let word = &self.words[target_item.word_index];
             
-            let box_padding = font_size * 0.6; // Increased padding for safer fit
+            let box_padding = font_size * 0.8; // Increased padding for safer fit
             let box_h = font_size * 1.4;
-            let visual_offset_y = font_size * 0.05;
+            let visual_offset_y = 0.0;
 
             // Center box vertically on text middle
             let target_rect = Rect {
@@ -345,7 +345,7 @@ impl FrameGenerator {
             commands.push(DrawCommand::DrawText {
                 text: word.text.clone(),
                 x: item.rect.x + pos_x,
-                y: item.rect.y + pos_y,
+                y: item.rect.y + (item.rect.h / 2.0) + pos_y, // Center text vertically
                 font_size,
                 fill_color: fill,
                 stroke_color: "none".to_string(), // No stroke
@@ -383,7 +383,7 @@ impl FrameGenerator {
             commands.push(DrawCommand::DrawText {
                 text: word.text.clone(),
                 x: item.rect.x + pos_x,
-                y: item.rect.y + pos_y,
+                y: item.rect.y + (item.rect.h / 2.0) + pos_y, // Center text vertically
                 font_size,
                 fill_color: fill,
                 stroke_color: stroke,

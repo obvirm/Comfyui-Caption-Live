@@ -439,3 +439,104 @@ Rendering Params: W=768, H=768, Scale=3.66, FontSize=36.6
 Starting Batch Render. Total Frames: 1, Chunk Size: 50
 Processing Chunk 0-1...
 Render Complete. Final Shape: torch.Size([1, 768, 768, 3])
+--- New Render Call ---
+Image Shape: torch.Size([192, 720, 1280, 3])
+CaptionLive: Rust backend loaded successfully from E:\Ai\ComfyUI\ComfyUI\custom_nodes\caption-live\rust_caption.pyd.
+Font Path: C:\Windows\Fonts\arial.ttf (Exists: True)
+Input Segments (raw): arial.ttf
+Segments JSON sent to Rust: [{"start": 0.0, "end": 1.0, "text": "Hello"},{"start": 1.0, "end": 2.0, "text": "World"}]
+Rendering Params: W=1280, H=720, Scale=6.10, FontSize=61.0
+Starting Batch Render. Total Frames: 192, Chunk Size: 50
+Processing Chunk 0-50...
+Processing Chunk 50-100...
+Processing Chunk 100-150...
+Processing Chunk 150-192...
+Render Complete. Final Shape: torch.Size([192, 720, 1280, 3])
+--- New Render Call ---
+Image Shape: torch.Size([1, 768, 768, 3])
+CaptionLive: Rust backend loaded successfully from E:\Ai\ComfyUI\ComfyUI\custom_nodes\caption-live\rust_caption.pyd.
+Font Path: C:\Windows\Fonts\arial.ttf (Exists: True)
+Input Segments (raw): arial.ttf
+Segments JSON sent to Rust: [{"start": 0.0, "end": 1.0, "text": "Hello"},{"start": 1.0, "end": 2.0, "text": "World"}]
+Rendering Params: W=768, H=768, Scale=3.66, FontSize=36.6
+Starting Batch Render. Total Frames: 1, Chunk Size: 50
+Processing Chunk 0-1...
+Using GPU Acceleration
+Rust Batch Render Error: module 'rust_caption' has no attribute 'render_gpu'
+Traceback (most recent call last):
+  File "E:\Ai\ComfyUI\ComfyUI\custom_nodes\caption-live\caption_live.py", line 154, in render
+    output_bytes_list = rust_caption.render_gpu(
+                        ^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: module 'rust_caption' has no attribute 'render_gpu'
+
+--- New Render Call ---
+Image Shape: torch.Size([1, 768, 768, 3])
+Font Path: C:\Windows\Fonts\arial.ttf (Exists: True)
+Input Segments (raw): arial.ttf
+Segments JSON sent to Rust: [{"start": 0.0, "end": 1.0, "text": "Hello"},{"start": 1.0, "end": 2.0, "text": "World"}]
+Rendering Params: W=768, H=768, Scale=3.66, FontSize=36.6
+Starting Batch Render. Total Frames: 1, Chunk Size: 50
+Processing Chunk 0-1...
+Render Complete. Final Shape: torch.Size([1, 768, 768, 3])
+--- New Render Call ---
+Image Shape: torch.Size([1, 768, 768, 3])
+Font Path: C:\Windows\Fonts\arial.ttf (Exists: True)
+Input Segments (raw): arial.ttf
+Segments JSON sent to Rust: [{"start": 0.0, "end": 1.0, "text": "Hello"},{"start": 1.0, "end": 2.0, "text": "World"}]
+Rendering Params: W=768, H=768, Scale=3.66, FontSize=36.6
+Starting Batch Render. Total Frames: 1, Chunk Size: 50
+Processing Chunk 0-1...
+Using GPU Acceleration
+Rust Batch Render Error: module 'rust_caption' has no attribute 'render_gpu'
+Traceback (most recent call last):
+  File "E:\Ai\ComfyUI\ComfyUI\custom_nodes\caption-live\caption_live.py", line 154, in render
+    output_bytes_list = rust_caption.render_gpu(
+                        ^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: module 'rust_caption' has no attribute 'render_gpu'
+
+--- New Render Call ---
+Image Shape: torch.Size([1, 768, 768, 3])
+Font Path: C:\Windows\Fonts\arial.ttf (Exists: True)
+Input Segments (raw): arial.ttf
+Segments JSON sent to Rust: [{"start": 0.0, "end": 1.0, "text": "Hello"},{"start": 1.0, "end": 2.0, "text": "World"}]
+Rendering Params: W=768, H=768, Scale=3.66, FontSize=36.6
+Starting Batch Render. Total Frames: 1, Chunk Size: 50
+Processing Chunk 0-1...
+Using GPU Acceleration
+Rust Batch Render Error: module 'rust_caption' has no attribute 'render_gpu'
+Traceback (most recent call last):
+  File "E:\Ai\ComfyUI\ComfyUI\custom_nodes\caption-live\caption_live.py", line 154, in render
+    output_bytes_list = rust_caption.render_gpu(
+                        ^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: module 'rust_caption' has no attribute 'render_gpu'
+
+--- New Render Call ---
+Image Shape: torch.Size([1, 768, 768, 3])
+CaptionLive: Rust backend loaded successfully from E:\Ai\ComfyUI\ComfyUI\custom_nodes\caption-live\rust_caption.pyd.
+Font Path: C:\Windows\Fonts\arial.ttf (Exists: True)
+Input Segments (raw): arial.ttf
+Segments JSON sent to Rust: [{"start": 0.0, "end": 1.0, "text": "Hello"},{"start": 1.0, "end": 2.0, "text": "World"}]
+Rendering Params: W=768, H=768, Scale=3.66, FontSize=36.6
+Starting Batch Render. Total Frames: 1, Chunk Size: 50
+Processing Chunk 0-1...
+Using GPU Acceleration
+Render Complete. Final Shape: torch.Size([1, 768, 768, 3])
+--- New Render Call ---
+Image Shape: torch.Size([1, 768, 768, 3])
+Font Path: C:\Windows\Fonts\arial.ttf (Exists: True)
+Input Segments (raw): arial.ttf
+Segments JSON sent to Rust: [{"start": 0.0, "end": 1.0, "text": "Hello"},{"start": 1.0, "end": 2.0, "text": "World"}]
+Rendering Params: W=768, H=768, Scale=3.66, FontSize=36.6
+Starting Batch Render. Total Frames: 1, Chunk Size: 50
+Processing Chunk 0-1...
+Render Complete. Final Shape: torch.Size([1, 768, 768, 3])
+--- New Render Call ---
+Image Shape: torch.Size([1, 768, 768, 3])
+Font Path: C:\Windows\Fonts\arial.ttf (Exists: True)
+Input Segments (raw): arial.ttf
+Segments JSON sent to Rust: [{"start": 0.0, "end": 1.0, "text": "Hello"},{"start": 1.0, "end": 2.0, "text": "World"}]
+Rendering Params: W=768, H=768, Scale=3.66, FontSize=36.6
+Starting Batch Render. Total Frames: 1, Chunk Size: 50
+Processing Chunk 0-1...
+Using GPU Acceleration
+Render Complete. Final Shape: torch.Size([1, 768, 768, 3])
