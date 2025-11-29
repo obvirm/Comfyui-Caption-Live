@@ -21,7 +21,7 @@ app.registerExtension({
                 console.error("❌ Failed to load CaptionLive WASM (Absolute Path):", e);
 
                 try {
-                    const module = await import("./pkg/caption_live_wasm.js");
+                    const module = await import("./pkg/caption_live_wasm.js?v=" + Date.now());
                     const init = module.default;
                     CaptionEngine = module.CaptionEngine;
                     await init();
@@ -77,23 +77,26 @@ app.registerExtension({
                 playBtn.style.fontSize = "12px";
                 playBtn.style.zIndex = "10";
                 playBtn.style.userSelect = "none";
-                
+
                 // Make container relative so absolute button works
                 container.style.position = "relative";
                 container.appendChild(playBtn);
 
-                let isPlaying = true;
+                let isPlaying = false;
+                playBtn.innerText = isPlaying ? "⏸" : "▶";
                 playBtn.onclick = (e) => {
                     e.stopPropagation(); // Prevent selecting node
                     isPlaying = !isPlaying;
                     playBtn.innerText = isPlaying ? "⏸" : "▶";
                 };
 
+
                 this.addDOMWidget("preview", "canvas", container, {
                     serialize: false,
                     hideOnZoom: false
                 });
 
+                // --- Auto-Resize on Ratio Change ---
                 // --- Auto-Resize on Ratio Change ---
                 const ratioWidget = this.widgets?.find(w => w.name === "aspect_ratio");
                 if (ratioWidget) {
@@ -110,6 +113,8 @@ app.registerExtension({
                 let engine = null;
                 let lastSegments = "";
                 let animationFrameId;
+                let isGpuInitialized = false;
+                let isGpuInitializing = false;
 
                 const ctx = canvas.getContext("2d");
 
@@ -128,38 +133,67 @@ app.registerExtension({
                     const highlightWidget = this.widgets?.find(w => w.name === "highlight_color");
                     const textWidget = this.widgets?.find(w => w.name === "text_color");
 
-                    let segmentsStr = segmentsWidget ? segmentsWidget.value : "[]";
-                    const style = styleWidget ? styleWidget.value : "box";
-                    const fontSizeRaw = fontSizeWidget ? fontSizeWidget.value : 56.0;
-                    const posXRaw = posXWidget ? posXWidget.value : 0;
-                    const posYRaw = posYWidget ? posYWidget.value : 0;
-                    const highlightColor = highlightWidget ? highlightWidget.value : "#39E55F";
-                    const textColor = textWidget ? textWidget.value : "#FFFFFF";
+                    // Check if segments widget exists (it might be converted to input)
+                    if (!segmentsWidget) {
+                        // Draw "Preview Unavailable" message
+                        ctx.fillStyle = "#202020";
+                        ctx.fillRect(0, 0, canvas.width, canvas.height);
+                        ctx.fillStyle = "#888";
+                        ctx.font = "14px Arial";
+                        ctx.textAlign = "center";
+                        ctx.textBaseline = "middle";
+                        ctx.fillText("Preview Unavailable", canvas.width / 2, canvas.height / 2 - 10);
+                        ctx.fillText("(Input Connected)", canvas.width / 2, canvas.height / 2 + 10);
 
-                    // Sanitize JSON input for WASM
+                        animationFrameId = requestAnimationFrame(render);
+                        return;
+                    }
+
+                    let segmentsStr = (segmentsWidget && segmentsWidget.value != null) ? String(segmentsWidget.value) : "[]";
+                    // Ensure empty string also falls back to default for critical UI elements if needed, 
+                    // but for text fields, empty string might be valid. 
+                    // For style/colors, we want defaults if empty.
+                    const style = (styleWidget && styleWidget.value) ? String(styleWidget.value) : "box";
+                    const fontSizeRaw = (fontSizeWidget && fontSizeWidget.value != null) ? Number(fontSizeWidget.value) : 56.0;
+                    const posXRaw = (posXWidget && posXWidget.value != null) ? Number(posXWidget.value) : 0;
+                    const posYRaw = (posYWidget && posYWidget.value != null) ? Number(posYWidget.value) : 0;
+                    const highlightColor = (highlightWidget && highlightWidget.value) ? String(highlightWidget.value) : "#39E55F";
+                    const textColor = (textWidget && textWidget.value) ? String(textWidget.value) : "#FFFFFF";
+
+                    // Smart JSON Sanitization
                     try {
-                        // 1. Replace single quotes with double quotes (common user/LLM error)
-                        segmentsStr = segmentsStr.replace(/'/g, '"');
-                        
-                        // 2. Extract the JSON array part if there's surrounding text
-                        const firstOpen = segmentsStr.indexOf("[");
-                        const lastClose = segmentsStr.lastIndexOf("]");
-                        
-                        if (firstOpen !== -1 && lastClose !== -1 && lastClose > firstOpen) {
-                            segmentsStr = segmentsStr.substring(firstOpen, lastClose + 1);
-                        }
+                        // 1. Try parsing as-is first (Best for valid JSON with apostrophes like "It's")
+                        JSON.parse(segmentsStr);
                     } catch (e) {
-                        // If sanitization fails, pass original string and let engine handle/fail
+                        // 2. If failed, try fixing common Python/LLM errors (single quotes)
+                        // Only do this if initial parse fails, to avoid breaking valid text containing '
+                        try {
+                            let fixedStr = segmentsStr.replace(/'/g, '"');
+                            // Extract JSON array if embedded in text
+                            const firstOpen = fixedStr.indexOf("[");
+                            const lastClose = fixedStr.lastIndexOf("]");
+                            if (firstOpen !== -1 && lastClose !== -1 && lastClose > firstOpen) {
+                                fixedStr = fixedStr.substring(firstOpen, lastClose + 1);
+                            }
+                            segmentsStr = fixedStr;
+                        } catch (e2) {
+                            // Give up, pass original
+                        }
                     }
 
                     if (segmentsStr !== lastSegments && CaptionEngine) {
                         try {
                             engine = new CaptionEngine(segmentsStr);
                             lastSegments = segmentsStr;
+                            // Reset GPU init status when engine is recreated
+                            isGpuInitialized = false;
+                            isGpuInitializing = false;
                         } catch (e) {
                             // Silent
                         }
                     }
+
+
 
                     // --- STABLE RENDERING LOGIC (Smart Zoom + Supersampling) ---
                     // "Ubah size jadi koordinat z" interpretation:
@@ -168,10 +202,10 @@ app.registerExtension({
                     // ADDED: * 2.0 for Supersampling to make it ultra-sharp ("tajam").
                     const zoom = app.canvas.ds.scale || 1;
                     const dpr = (window.devicePixelRatio || 1) * zoom * 2.0;
-                    
+
                     // Width: Node Width - Margins (approx 6px total)
                     const logicalWidth = (this.size ? this.size[0] : 200) - 6;
-                    
+
                     // Height: Parse from the container style set by onResize/onDrawForeground
                     let logicalHeight = 200;
                     if (container.style.height) {
@@ -190,21 +224,52 @@ app.registerExtension({
                     if (isPlaying && engine) {
                         // Skip render if canvas is too small
                         if (canvas.width > 50 && canvas.height > 50) {
+                            const fontPathWidget = this.widgets?.find(w => w.name === "font_path");
+                            let fontFamily = "Arial";
+                            if (fontPathWidget && fontPathWidget.value) {
+                                const path = String(fontPathWidget.value);
+                                const filename = path.split(/[\\/]/).pop();
+                                if (filename) {
+                                    fontFamily = filename.split('.')[0];
+                                }
+                            }
+
                             try {
                                 const time = (Date.now() / 1000) % 10.0;
-                                
-                                // Calculate pixel font size based on zoom/DPI
-                                // We multiply by app.canvas.ds.scale (zoom level) to keep text proportional to the node
-                                const zoomLevel = app.canvas.ds.scale || 1;
-                                const targetFontSizePx = fontSizeRaw * dpr;
-                                
-                                // Position offsets (also scaled by DPR to match canvas coordinates)
-                                const targetPosX = posXRaw * dpr;
-                                const targetPosY = posYRaw * dpr;
+                                const scaleFactor = canvas.width / 210.0;
+                                const targetFontSizePx = fontSizeRaw * scaleFactor;
+                                const targetPosX = posXRaw * scaleFactor;
+                                const targetPosY = posYRaw * scaleFactor;
 
-                                engine.draw_frame(ctx, canvas.width, canvas.height, time, style, targetFontSizePx, targetPosX, targetPosY, highlightColor, textColor);
+                                const gpuWidget = this.widgets?.find(w => w.name === "gpu_acceleration");
+                                const useGpu = gpuWidget && gpuWidget.value === true;
+
+                                if (useGpu) {
+                                    if (!isGpuInitialized && !isGpuInitializing) {
+                                        isGpuInitializing = true;
+                                        // Note: init_gpu is async. We start it and wait.
+                                        engine.init_gpu(canvas).then(() => {
+                                            console.log("WebGPU Initialized!");
+                                            isGpuInitialized = true;
+                                            isGpuInitializing = false;
+                                        }).catch(e => {
+                                            console.error("WebGPU Init Failed:", e);
+                                            isGpuInitializing = false;
+                                        });
+                                    }
+
+                                    if (isGpuInitialized) {
+                                        engine.draw_frame_gpu(canvas.width, canvas.height, time, style, targetFontSizePx, targetPosX, targetPosY, highlightColor, textColor, fontFamily);
+                                    }
+                                } else {
+                                    // Fallback to CPU/Canvas2D if GPU is disabled or not ready
+                                    // Note: Switching contexts on the same canvas (2D <-> WebGPU) can be tricky.
+                                    // Ideally, we should stick to one, but for now we try to coexist or just use what's requested.
+                                    engine.draw_frame(ctx, canvas.width, canvas.height, time, style, targetFontSizePx, targetPosX, targetPosY, highlightColor, textColor, fontFamily);
+                                }
                             } catch (e) {
                                 console.warn("CaptionLive Render Error:", e);
+                                console.warn("Debug Args:", { style, highlightColor, textColor, segmentsStr, fontSizeRaw, posXRaw, posYRaw, fontFamily });
                             }
                         }
                     }
@@ -244,13 +309,13 @@ app.registerExtension({
 
                 const previewWidget = this.widgets.find(w => w.name === "preview");
                 const ratioWidget = this.widgets.find(w => w.name === "aspect_ratio");
-                
+
                 if (!previewWidget) return;
 
                 // 1. Calculate height needed for inputs (excluding preview)
                 const prevIndex = this.widgets.indexOf(previewWidget);
                 let inputsHeight = 0;
-                
+
                 if (prevIndex > -1) {
                     this.widgets.splice(prevIndex, 1);
                     inputsHeight = this.computeSize([size[0], 0])[1];
@@ -266,7 +331,7 @@ app.registerExtension({
                     // Fixed Aspect Ratio Mode
                     // Width of the widget is roughly Node Width - (Margin * 2)
                     // We assume margin is around 6px total (3px each side)
-                    const widgetWidth = size[0] - 6; 
+                    const widgetWidth = size[0] - 6;
                     targetPreviewHeight = widgetWidth / targetRatio;
                 } else {
                     // Custom/Fill Mode
@@ -279,7 +344,7 @@ app.registerExtension({
                 // 3. Auto-grow or Auto-shrink (if fixed ratio)
                 // Only resize node if the difference is significant to avoid loop
                 if (Math.abs(size[1] - targetTotalHeight) > 5) {
-                     this.setSize([size[0], targetTotalHeight]);
+                    this.setSize([size[0], targetTotalHeight]);
                 }
             };
 
@@ -297,7 +362,7 @@ app.registerExtension({
 
                 if (previewWidget && previewWidget.element) {
                     const widgetY = previewWidget.last_y;
-                    
+
                     if (widgetY !== undefined) {
                         let height = 0;
                         const targetRatio = ratioWidget ? getAspectRatio(ratioWidget.value) : null;
@@ -308,13 +373,13 @@ app.registerExtension({
                             height = widgetWidth / targetRatio;
                         } else {
                             // Fill remaining space
-                            const padding = 25; 
+                            const padding = 25;
                             height = this.size[1] - widgetY - padding;
                         }
-                        
+
                         // Prevent negative height
                         if (height < 0) height = 0;
-                        
+
                         previewWidget.element.style.height = height + "px";
                     }
                 }

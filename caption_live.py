@@ -28,6 +28,7 @@ class CaptionLiveNode:
                 "pos_x": ("INT", {"default": 0, "min": -2000, "max": 2000}),
                 "pos_y": ("INT", {"default": 0, "min": -2000, "max": 2000}),
                 "style": (["box", "colored", "scaling"], {"default": "box"}),
+                "gpu_acceleration": ("BOOLEAN", {"default": False}),
             },
             "optional": {
                 "mask_optional": ("MASK",),
@@ -38,7 +39,7 @@ class CaptionLiveNode:
     FUNCTION = "render"
     CATEGORY = "caption-live"
 
-    def render(self, images, segments, fps, font_size, highlight_color, text_color, font_path, aspect_ratio, pos_x, pos_y, style, mask_optional=None):
+    def render(self, images, segments, fps, font_size, highlight_color, text_color, font_path, aspect_ratio, pos_x, pos_y, style, gpu_acceleration, mask_optional=None):
         global rust_caption
         
         log_path = os.path.join(os.path.dirname(__file__), "debug.log")
@@ -81,7 +82,7 @@ class CaptionLiveNode:
                     font_path = win_font
         
         log(f"Font Path: {font_path} (Exists: {os.path.exists(font_path)})")
-        log(f"Input Segments (raw): {original_font_path}") # This was a typo, should be segments
+        log(f"Input Segments (raw): {original_font_path}")
 
         # Parse Segments
         try:
@@ -100,8 +101,7 @@ class CaptionLiveNode:
             return (images,)
         
         log(f"Segments JSON sent to Rust: {segments_json}")
-        # Clone output
-        output_images = images.clone()
+        
         width = int(images.shape[2])
         height = int(images.shape[1])
         
@@ -114,59 +114,117 @@ class CaptionLiveNode:
         
         log(f"Rendering Params: W={width}, H={height}, Scale={scale_factor:.2f}, FontSize={scaled_font_size:.1f}")
         
-        # Pre-calculate timestamps
-        success_count = 0
-        error_count = 0
-        
-        for i in range(images.shape[0]):
-            try:
-                time = i / fps
-                
-                # Returns Vec<u8> (RGBA bytes)
-                rgba_bytes = rust_caption.render_mask_v2(
-                    segments_json,
-                    width,
-                    height,
-                    time,
-                    fps,
-                    str(font_path),
-                    style,
-                    str(highlight_color),
-                    str(text_color),
-                    scaled_pos_x,
-                    scaled_pos_y,
-                    scaled_font_size
-                )
-                
-                # Convert list/bytes to tensor (H, W, 4)
-                if isinstance(rgba_bytes, list):
-                    rgba_np = np.array(rgba_bytes, dtype=np.uint8)
-                else:
-                    rgba_np = np.frombuffer(rgba_bytes, dtype=np.uint8)
-                
-                if i == 0:
-                    log(f"Rust Buffer Size: {len(rgba_bytes)} bytes")
-                    max_val = np.max(rgba_np) if len(rgba_np) > 0 else 'Empty'
-                    log(f"Buffer Max Value: {max_val}")
+        try:
+            # --- CHUNKING & MEMORY OPTIMIZATION ---
+            import gc
+            
+            chunk_size = 50
+            total_frames = images.shape[0]
+            output_tensors = []
+            
+            log(f"Starting Batch Render. Total Frames: {total_frames}, Chunk Size: {chunk_size}")
 
-                rgba_tensor = torch.from_numpy(rgba_np.reshape(height, width, 4))
-                rgba_tensor = rgba_tensor.to(output_images.device)
+            for start_idx in range(0, total_frames, chunk_size):
+                end_idx = min(start_idx + chunk_size, total_frames)
+                log(f"Processing Chunk {start_idx}-{end_idx}...")
                 
-                # Alpha Blending
-                alpha = rgba_tensor[:, :, 3:4].float() / 255.0
-                overlay_rgb = rgba_tensor[:, :, 0:3].float() / 255.0
-                background_rgb = output_images[i]
+                # 1. Prepare Chunk
+                chunk_images = images[start_idx:end_idx]
                 
-                blended = overlay_rgb * alpha + background_rgb * (1.0 - alpha)
-                output_images[i] = blended
-                success_count += 1
-            except Exception as e:
-                if error_count < 5: # Limit error logs
-                    log(f"Rust Render Error (Frame {i}): {e}")
-                error_count += 1
-        
-        log(f"Render Complete. Success: {success_count}, Errors: {error_count}")
-        return (output_images,)
+                # Ensure RGBA
+                is_rgb_input = chunk_images.shape[3] == 3
+                if is_rgb_input:
+                    alpha = torch.ones((chunk_images.shape[0], chunk_images.shape[1], chunk_images.shape[2], 1), device=chunk_images.device)
+                    chunk_images = torch.cat((chunk_images, alpha), dim=3)
+                    del alpha # Cleanup immediately
+                
+                # Convert to bytes
+                images_uint8 = (chunk_images * 255).clamp(0, 255).to(torch.uint8).cpu().numpy()
+                images_bytes = [frame.tobytes() for frame in images_uint8]
+                
+                # Cleanup intermediate tensors
+                del chunk_images
+                del images_uint8
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+                
+                # 2. Call Rust
+                if gpu_acceleration:
+                    log("Using GPU Acceleration")
+                    output_bytes_list = rust_caption.render_gpu(
+                        images_bytes, 
+                        width, 
+                        height, 
+                        fps, 
+                        segments_json, 
+                        font_path, 
+                        style, 
+                        highlight_color, 
+                        text_color, 
+                        scaled_pos_x, 
+                        scaled_pos_y, 
+                        scaled_font_size
+                    )
+                else:
+                    output_bytes_list = rust_caption.render_tiktok_batch(
+                        images_bytes, 
+                        width, 
+                        height, 
+                        fps, 
+                        segments_json, 
+                        font_path, 
+                        style, 
+                        highlight_color, 
+                        text_color, 
+                        scaled_pos_x, 
+                        scaled_pos_y, 
+                        scaled_font_size
+                    )
+                
+                # Cleanup input bytes
+                del images_bytes
+                
+                # 3. Reconstruct Tensor
+                chunk_tensors = []
+                for raw_bytes in output_bytes_list:
+                    if isinstance(raw_bytes, list):
+                        img_np = np.array(raw_bytes, dtype=np.uint8).reshape(height, width, 4)
+                    else:
+                        img_np = np.frombuffer(raw_bytes, dtype=np.uint8).reshape(height, width, 4)
+                    
+                    img_tensor = torch.from_numpy(img_np).float() / 255.0
+                    chunk_tensors.append(img_tensor)
+                
+                # Cleanup Rust output
+                del output_bytes_list
+                
+                # Stack Chunk
+                chunk_final = torch.stack(chunk_tensors).to(images.device)
+                
+                # Restore RGB if needed
+                if is_rgb_input:
+                    chunk_final = chunk_final[:, :, :, :3]
+                
+                output_tensors.append(chunk_final)
+                
+                # Aggressive Cleanup after each chunk
+                del chunk_tensors
+                gc.collect()
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+                    torch.cuda.ipc_collect()
+
+            # Concatenate all chunks
+            final_output = torch.cat(output_tensors, dim=0)
+            
+            log(f"Render Complete. Final Shape: {final_output.shape}")
+            return (final_output,)
+
+        except Exception as e:
+            log(f"Rust Batch Render Error: {e}")
+            import traceback
+            log(traceback.format_exc())
+            return (images,)
 
 # Node Registration
 NODE_CLASS_MAPPINGS = {

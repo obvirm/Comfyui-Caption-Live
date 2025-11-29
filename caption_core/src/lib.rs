@@ -1,5 +1,8 @@
 use serde::{Deserialize, Serialize};
 
+#[cfg(feature = "gpu")]
+pub mod gpu;
+
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Word {
     pub text: String,
@@ -15,7 +18,7 @@ pub struct Segment {
     pub words: Option<Vec<Word>>,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 pub struct Rect {
     pub x: f64,
     pub y: f64,
@@ -265,4 +268,131 @@ impl<'a, M: TextMeasurer> LayoutEngine<'a, M> {
 pub struct FrameState {
     pub active_word_index: Option<usize>,
     pub box_rect: Option<Rect>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum DrawCommand {
+    DrawRect { 
+        rect: Rect, 
+        color: String, 
+        radius: f64 
+    },
+    DrawText { 
+        text: String, 
+        x: f64, 
+        y: f64, 
+        font_size: f64, 
+        fill_color: String, 
+        stroke_color: String, 
+        stroke_width: f64,
+        scale: f64,
+        rotation: f64
+    },
+}
+
+pub struct FrameGenerator;
+
+impl FrameGenerator {
+    pub fn generate_frame(
+        layout: &LayoutResult, 
+        frame_state: &FrameState, 
+        words: &[Word], 
+        style: &str, 
+        highlight_color: &str, 
+        text_color: &str,
+        pos_x: f64,
+        pos_y: f64
+    ) -> Vec<DrawCommand> {
+        let mut commands = Vec::new();
+        let active_idx = frame_state.active_word_index;
+
+        // 1. Draw Active Box (Background Layer)
+        if let Some(idx) = active_idx {
+            if style == "box" {
+                if let Some(box_rect) = frame_state.box_rect {
+                    let box_h = box_rect.h;
+                    let box_radius = box_h * 0.2;
+                    
+                    commands.push(DrawCommand::DrawRect {
+                        rect: Rect {
+                            x: box_rect.x + pos_x,
+                            y: box_rect.y + pos_y,
+                            w: box_rect.w,
+                            h: box_rect.h,
+                        },
+                        color: highlight_color.to_string(),
+                        radius: box_radius,
+                    });
+                }
+            }
+        }
+
+        // 2. Draw Passive Text (Middle Layer)
+        for (i, item) in layout.words.iter().enumerate() {
+            // Skip active word (drawn later on top)
+            if let Some(active) = active_idx {
+                if i == active { continue; }
+            }
+            
+            let word = &words[item.word_index];
+            let font_size = layout.font_size;
+            
+            // Passive text color
+            let fill = text_color.to_string();
+            // No stroke for passive text usually, or maybe thin black?
+            // WASM implementation didn't stroke passive text, just fill.
+            
+            commands.push(DrawCommand::DrawText {
+                text: word.text.clone(),
+                x: item.rect.x + pos_x,
+                y: item.rect.y + pos_y,
+                font_size,
+                fill_color: fill,
+                stroke_color: "none".to_string(), // No stroke
+                stroke_width: 0.0,
+                scale: 1.0,
+                rotation: 0.0,
+            });
+        }
+
+        // 3. Draw Active Text (Top Layer)
+        if let Some(idx) = active_idx {
+            let item = &layout.words[idx];
+            let word = &words[item.word_index];
+            let font_size = layout.font_size;
+            
+            let mut fill = text_color.to_string();
+            let mut stroke = "black".to_string();
+            let mut stroke_width = font_size * 0.08;
+            let mut scale = 1.0;
+            
+            if style == "box" {
+                // Box style: Text is usually white (or text_color), with black stroke
+                fill = text_color.to_string();
+                stroke = "black".to_string();
+            } else if style == "colored" {
+                // Colored style: Text is highlight color
+                fill = highlight_color.to_string();
+                scale = 1.1; // Slight pop
+            } else if style == "scaling" {
+                // Scaling style: Text is highlight color + big scale
+                fill = highlight_color.to_string();
+                scale = 1.25;
+            }
+            
+            commands.push(DrawCommand::DrawText {
+                text: word.text.clone(),
+                x: item.rect.x + pos_x,
+                y: item.rect.y + pos_y,
+                font_size,
+                fill_color: fill,
+                stroke_color: stroke,
+                stroke_width,
+                scale,
+                rotation: 0.0,
+            });
+        }
+
+        commands
+    }
 }

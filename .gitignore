@@ -1,0 +1,7 @@
+target/
+__pycache__/
+*.pyc
+.vscode/
+.idea/
+node_modules/
+.DS_Store

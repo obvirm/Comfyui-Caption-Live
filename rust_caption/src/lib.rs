@@ -1,238 +1,325 @@
 use pyo3::prelude::*;
-use image::{Rgba, RgbaImage, DynamicImage, GenericImageView};
-use imageproc::drawing::{draw_text_mut, draw_filled_rect_mut, draw_filled_circle_mut};
-use imageproc::rect::Rect as ImageRect;
-use rusttype::{Font, Scale, point, PositionedGlyph};
-use std::fs;
-use std::path::Path;
-use caption_core::{LayoutEngine, TextMeasurer, Rect, Word, Segment, parse_hex_rgba, interpolate_rect, LayoutSettings};
+use tiny_skia::{Pixmap, Transform, PixmapPaint, IntSize, Paint, Color};
+use usvg::{self, Options, TreeParsing, TreeTextToPath};
+use caption_core::{Word, LayoutEngine, LayoutSettings, TextMeasurer, Rect};
+use rusttype::{Font, Scale};
 
-// Implement TextMeasurer for rusttype::Font
-struct RusttypeMeasurer<'a> {
+// Implement TextMeasurer using rusttype
+struct RustTypeMeasurer<'a> {
     font: &'a Font<'a>,
 }
 
-impl<'a> TextMeasurer for RusttypeMeasurer<'a> {
+impl<'a> TextMeasurer for RustTypeMeasurer<'a> {
     fn measure_text(&self, text: &str, font_size: f64) -> (f64, f64) {
         let scale = Scale::uniform(font_size as f32);
         let v_metrics = self.font.v_metrics(scale);
-        let height = (v_metrics.ascent - v_metrics.descent + v_metrics.line_gap) as f64;
         
-        let width = self.font
-            .layout(text, scale, point(0.0, 0.0))
-            .map(|g| g.position().x + g.unpositioned().h_metrics().advance_width)
-            .last()
-            .unwrap_or(0.0) as f64;
-            
+        let mut width = 0.0;
+        for glyph in self.font.layout(text, scale, rusttype::point(0.0, 0.0)) {
+            if let Some(bb) = glyph.pixel_bounding_box() {
+                width = bb.max.x as f64;
+            }
+        }
+        
+        let height = (v_metrics.ascent - v_metrics.descent) as f64;
         (width, height)
     }
 }
 
-fn draw_rounded_rect_mut(image: &mut RgbaImage, rect: Rect, radius: f64, color: Rgba<u8>) {
-    let x = rect.x as i32;
-    let y = rect.y as i32;
-    let w = rect.w as i32;
-    let h = rect.h as i32;
-    let r = radius as i32;
+// Helper to draw a rounded rect using SVG
+fn draw_rounded_rect_svg(rect: Rect, color: &str, radius: f64) -> String {
+    // Clamp radius to prevent artifacts when box is small (Match WASM logic)
+    let max_r = (rect.w.min(rect.h)) / 2.0;
+    let r = radius.min(max_r).max(0.0);
 
-    // Center rect
-    draw_filled_rect_mut(image, ImageRect::at(x + r, y).of_size((w - 2 * r) as u32, h as u32), color);
-    // Left rect
-    draw_filled_rect_mut(image, ImageRect::at(x, y + r).of_size(r as u32, (h - 2 * r) as u32), color);
-    // Right rect
-    draw_filled_rect_mut(image, ImageRect::at(x + w - r, y + r).of_size(r as u32, (h - 2 * r) as u32), color);
-    
-    // Corners
-    draw_filled_circle_mut(image, (x + r, y + r), r, color);
-    draw_filled_circle_mut(image, (x + w - r, y + r), r, color);
-    draw_filled_circle_mut(image, (x + r, y + h - r), r, color);
-    draw_filled_circle_mut(image, (x + w - r, y + h - r), r, color);
+    format!(
+        r#"<rect x="{}" y="{}" width="{}" height="{}" rx="{}" fill="{}" />"#,
+        rect.x, rect.y, rect.w, rect.h, r, color
+    )
+}
+
+// Helper to draw text using SVG
+fn draw_text_svg(text: &str, x: f64, y: f64, font_family: &str, font_size: f64, color: &str, stroke_color: &str, stroke_width: f64) -> String {
+    let escaped_text = text.replace("&", "&amp;")
+                           .replace("<", "&lt;")
+                           .replace(">", "&gt;")
+                           .replace("\"", "&quot;")
+                           .replace("'", "&apos;");
+                           
+    format!(
+        r#"
+        <text x="{}" y="{}" font-family="{}" font-size="{}" fill="{}" stroke="{}" stroke-width="{}" stroke-linejoin="round" paint-order="stroke" font-weight="900" dominant-baseline="middle">
+            {}
+        </text>
+        "#,
+        x, y, font_family, font_size, color, stroke_color, stroke_width, escaped_text
+    )
 }
 
 #[pyfunction]
-fn render_mask_v2(
-    json_data: String,
+fn render_tiktok_batch(
+    _py: Python,
+    py_images: Vec<Vec<u8>>,
     width: u32,
     height: u32,
-    time: f64,
-    _fps: f64,
+    fps: f64,
+    subtitle_json: String,
+    font_path: String,
+    style: String, 
+    highlight_color: String,
+    text_color: String,
+    pos_x: f64, 
+    pos_y: f64,
+    font_size: f64
+) -> PyResult<Vec<Vec<u8>>> {
+    
+    // 1. Load Font for Measuring (RustType)
+    let font_data = std::fs::read(&font_path).map_err(|e| {
+        PyErr::new::<pyo3::exceptions::PyIOError, _>(format!("Failed to read font file: {}", e))
+    })?;
+    let font = Font::try_from_vec(font_data.clone()).ok_or_else(|| {
+        PyErr::new::<pyo3::exceptions::PyValueError, _>("Failed to parse font data")
+    })?;
+    
+    let measurer = RustTypeMeasurer { font: &font };
+
+    // 2. Setup Font Database for Rendering (USVG)
+    let mut fontdb = usvg::fontdb::Database::new();
+    fontdb.load_system_fonts();
+    fontdb.load_font_data(font_data); 
+    let font_family = "Montserrat"; 
+    
+    // 3. Parse Subtitles -> Words
+    let segments: Vec<serde_json::Value> = serde_json::from_str(&subtitle_json).map_err(|e| {
+        PyErr::new::<pyo3::exceptions::PyValueError, _>(format!("JSON Error: {}", e))
+    })?;
+    
+    let mut words = Vec::new();
+    for seg in segments {
+        let text = seg["text"].as_str().unwrap_or("").to_string();
+        let start = seg["start"].as_f64().unwrap_or(0.0);
+        let end = seg["end"].as_f64().unwrap_or(0.0);
+        words.push(Word { text, start, end });
+    }
+    
+    // 4. Initialize Layout Engine
+    let engine = LayoutEngine::new(&words, &measurer);
+    
+    // Define Layout Settings (Match WASM logic)
+    // NO LETTERBOXING - stretch content to fill entire canvas
+    // Use actual canvas dimensions for layout
+    let side_margin = 20.0;
+    let container_h = (height as f64) * 0.80; // Use 80% of height to allow large text
+    
+    let container = Rect {
+        x: side_margin, 
+        y: ((height as f64) - container_h) / 2.0,
+        w: (width as f64) - (side_margin * 2.0),
+        h: container_h,
+    };
+    
+    let settings = LayoutSettings {
+        container,
+        min_font_size: font_size, // Fixed font size
+        max_font_size: font_size,
+        padding: 10.0, // Match WASM padding
+    };
+    
+    let layout = engine.calculate_best_fit(settings);
+    
+    let mut output_images = Vec::with_capacity(py_images.len());
+
+    // Loop Processing
+    for (i, raw_bytes) in py_images.into_iter().enumerate() {
+        let current_time = i as f64 / fps;
+        
+        let mut final_frame_data = raw_bytes;
+        
+        {
+            let size = IntSize::from_wh(width, height).ok_or_else(|| {
+                 PyErr::new::<pyo3::exceptions::PyValueError, _>("Invalid dimensions")
+            })?;
+
+            let mut pixmap = Pixmap::from_vec(final_frame_data, size).ok_or_else(|| {
+                PyErr::new::<pyo3::exceptions::PyValueError, _>("Failed to create Pixmap from bytes")
+            })?;
+
+            // Calculate Frame State (Animation)
+            let frame_state = engine.calculate_frame(&layout, current_time);
+            
+            // Generate Draw Commands from Core
+            let commands = caption_core::FrameGenerator::generate_frame(
+                &layout, 
+                &frame_state, 
+                &words, 
+                &style, 
+                &highlight_color, 
+                &text_color, 
+                pos_x, 
+                pos_y
+            );
+            
+            // Build SVG from Commands
+            let mut svg_content = String::new();
+            
+            for cmd in commands {
+                match cmd {
+                    caption_core::DrawCommand::DrawRect { rect, color, radius } => {
+                        svg_content.push_str(&draw_rounded_rect_svg(rect, &color, radius));
+                    },
+                    caption_core::DrawCommand::DrawText { text, x, y, font_size, fill_color, stroke_color, stroke_width, scale, rotation: _ } => {
+                        let mut final_font_size = font_size;
+                        if scale != 1.0 {
+                            final_font_size = font_size * scale;
+                        }
+
+                        // Emulate Canvas "Stroke then Fill" by drawing two text elements
+                        // 1. Stroke Layer (Background)
+                        if stroke_width > 0.0 {
+                            svg_content.push_str(&format!(
+                                r#"<text x="{}" y="{}" font-family="{}" font-size="{}" fill="none" stroke="{}" stroke-width="{}" stroke-linejoin="round" font-weight="900" dominant-baseline="middle">{}</text>"#,
+                                x, y, font_family, final_font_size, stroke_color, stroke_width, text
+                            ));
+                        }
+
+                        // 2. Fill Layer (Foreground)
+                        svg_content.push_str(&format!(
+                            r#"<text x="{}" y="{}" font-family="{}" font-size="{}" fill="{}" stroke="none" font-weight="900" dominant-baseline="middle">{}</text>"#,
+                            x, y, font_family, final_font_size, fill_color, text
+                        ));
+                    }
+                }
+            }
+            
+            let svg_data = format!(
+                r#"<svg width="{}" height="{}" xmlns="http://www.w3.org/2000/svg">{}</svg>"#,
+                width, height, svg_content
+            );
+            
+            // Render SVG
+            let mut opt = Options::default();
+            opt.font_family = font_family.to_string();
+            
+            if let Ok(mut tree) = usvg::Tree::from_str(&svg_data, &opt) {
+                tree.convert_text(&fontdb);
+                let mut text_pixmap = Pixmap::new(width, height).unwrap();
+                let rtree = resvg::Tree::from_usvg(&tree);
+                rtree.render(Transform::default(), &mut text_pixmap.as_mut());
+                
+                pixmap.draw_pixmap(
+                    0, 0, 
+                    text_pixmap.as_ref(), 
+                    &PixmapPaint::default(), 
+                    Transform::default(), 
+                    None
+                );
+            }
+            
+            final_frame_data = pixmap.take();
+        }
+        
+        output_images.push(final_frame_data);
+    }
+    output_images.shrink_to_fit();
+    Ok(output_images)
+}
+
+#[cfg(feature = "gpu")]
+#[pyfunction]
+fn render_gpu(
+    _py: Python,
+    py_images: Vec<Vec<u8>>,
+    width: u32,
+    height: u32,
+    fps: f64,
+    subtitle_json: String,
     font_path: String,
     style: String,
     highlight_color: String,
     text_color: String,
     pos_x: f64,
     pos_y: f64,
-    font_size_px: f64, 
-) -> PyResult<Vec<u8>> {
+    font_size: f64
+) -> PyResult<Vec<Vec<u8>>> {
+    // Parse Subtitles (Reuse logic or extract to helper)
+    let segments: Vec<serde_json::Value> = serde_json::from_str(&subtitle_json).map_err(|e| {
+        PyErr::new::<pyo3::exceptions::PyValueError, _>(format!("JSON Error: {}", e))
+    })?;
     
-    // 1. Load Font
-    let font_data = fs::read(&font_path).map_err(|e| PyErr::new::<pyo3::exceptions::PyIOError, _>(format!("Failed to load font: {}", e)))?;
-    let font = Font::try_from_vec(font_data).ok_or_else(|| PyErr::new::<pyo3::exceptions::PyValueError, _>("Error constructing font"))?;
-    println!("[RUST] Font loaded. Font_path: {}", font_path);
-
-    // 2. Parse Data
-    println!("[RUST] Raw json_data received: {}", json_data);
-    let segments: Vec<Segment> = serde_json::from_str(&json_data).map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(format!("JSON Error: {}", e)))?;
-    println!("[RUST] Segments parsed. Count: {}", segments.len());
-    let mut all_words = Vec::new();
+    let mut words = Vec::new();
     for seg in segments {
-        if let Some(words) = seg.words {
-            all_words.extend(words);
-        } else {
-            all_words.push(Word {
-                text: seg.text,
-                start: seg.start,
-                end: seg.end,
-            });
-        }
-    }
-    println!("[RUST] All words collected. Count: {}", all_words.len());
-
-    // Check for empty words before proceeding
-    if all_words.is_empty() {
-        println!("[RUST] WARNING: No words found after parsing segments. Returning empty image.");
-        return Ok(RgbaImage::new(width, height).into_vec());
+        let text = seg["text"].as_str().unwrap_or("").to_string();
+        let start = seg["start"].as_f64().unwrap_or(0.0);
+        let end = seg["end"].as_f64().unwrap_or(0.0);
+        words.push(Word { text, start, end });
     }
 
-    // 3. Setup Engine & Layout
-    let measurer = RusttypeMeasurer { font: &font };
-    let engine = LayoutEngine::new(&all_words, &measurer);
-    println!("[RUST] LayoutEngine created with {} words.", all_words.len());
+    // Layout Engine (Need Measurer)
+    // For GPU, we might use glyphon for measuring too?
+    // Or just use RustTypeMeasurer as before for layout calculation.
+    // Ideally, layout should match rendering. Glyphon uses cosmic-text which has its own shaping.
+    // If we use RustType for layout and Glyphon for rendering, they might mismatch.
+    // But for now, let's reuse RustTypeMeasurer for layout to keep it simple.
     
-    // Layout Logic (Matching WASM v2)
-    // Use actual pixel dimensions without arbitrary scaling
-    let w_f64 = width as f64;
-    let h_f64 = height as f64;
-    
+    let font_data = std::fs::read(&font_path).map_err(|e| {
+        PyErr::new::<pyo3::exceptions::PyIOError, _>(format!("Failed to read font file: {}", e))
+    })?;
+    let font = Font::try_from_vec(font_data.clone()).ok_or_else(|| {
+        PyErr::new::<pyo3::exceptions::PyValueError, _>("Failed to parse font data")
+    })?;
+    let measurer = RustTypeMeasurer { font: &font };
+    let engine = LayoutEngine::new(&words, &measurer);
+
+    // Layout Settings
     let side_margin = 20.0;
-    let container_h = h_f64 * 0.80; // 80% height
-    
+    let container_h = (height as f64) * 0.80;
     let container = Rect {
-        x: side_margin + pos_x,
-        y: ((h_f64 - container_h) / 2.0) + pos_y,
-        w: w_f64 - (side_margin * 2.0),
+        x: side_margin, 
+        y: ((height as f64) - container_h) / 2.0,
+        w: (width as f64) - (side_margin * 2.0),
         h: container_h,
     };
-    println!("[RUST] Container Rect: x={}, y={}, w={}, h={}", container.x, container.y, container.w, container.h);
-    
-    // Fixed font size requested by user
     let settings = LayoutSettings {
         container,
-        min_font_size: font_size_px,
-        max_font_size: font_size_px,
+        min_font_size: font_size,
+        max_font_size: font_size,
         padding: 10.0,
     };
-    
     let layout = engine.calculate_best_fit(settings);
-    let font_size = layout.font_size;
-    println!("[RUST] Layout calculated. Layout words count: {}, Font Size: {}", layout.words.len(), layout.font_size);
-    if layout.words.is_empty() {
-        println!("[RUST] WARNING: Layout resulted in no words. Returning empty image.");
-        return Ok(RgbaImage::new(width, height).into_vec());
-    }
-    
-    // 4. Calculate Frame State (Animation & Active Word)
-    let frame_state = engine.calculate_frame(&layout, time);
-    let active_idx = frame_state.active_word_index;
-    println!("[RUST] Frame state calculated. Active idx: {:?}", active_idx);
 
-    // 5. Render to Image
-    let mut image = RgbaImage::new(width, height);
-    println!("[RUST] Image buffer created: {}x{} pixels", width, height);
-    
-    let col_text = Rgba(parse_hex_rgba(&text_color));
-    let col_highlight = Rgba(parse_hex_rgba(&highlight_color));
-    let col_white = Rgba([255, 255, 255, 255]);
-    let col_black = Rgba([0, 0, 0, 255]);
+    // GPU Context
+    let mut output_images = Vec::with_capacity(py_images.len());
 
-    println!("[RUST] Colors - Text: {:?}, Highlight: {:?}", col_text, col_highlight);
+    pollster::block_on(async {
+        let mut ctx = caption_core::gpu::HeadlessContext::new(width, height).await;
 
-    // A. Draw Passive Text
-    // Use user-defined text_color for passive text instead of hardcoded black/white
-    let passive_color = col_text; 
-    
-    for (i, item) in layout.words.iter().enumerate() {
-        if let Some(active) = active_idx {
-            // ALWAYS skip active word from passive drawing
-            if i == active {
-                continue;
-            }
+        for (i, raw_bytes) in py_images.into_iter().enumerate() {
+            let current_time = i as f64 / fps;
+            let frame_state = engine.calculate_frame(&layout, current_time);
+            
+            let commands = caption_core::FrameGenerator::generate_frame(
+                &layout, 
+                &frame_state, 
+                &words, 
+                &style, 
+                &highlight_color, 
+                &text_color, 
+                pos_x, 
+                pos_y
+            );
+
+            let result_bytes = ctx.render_frame(&raw_bytes, &commands).await;
+            output_images.push(result_bytes);
         }
-        let word = &all_words[item.word_index];
-        
-        let x = item.rect.x as i32;
-        let y = item.rect.y as i32;
-        let scaled_scale = Scale::uniform(font_size as f32);
+    });
 
-        println!("[RUST] Drawing passive text '{}' at ({},{})", word.text, x, y);
-        draw_text_mut(&mut image, passive_color, x, y, scaled_scale, &font, &word.text);
-    }
-
-    // B. Draw Active Text & Box
-    if let Some(idx) = active_idx {
-        println!("[RUST] Active word index: {}", idx);
-        if style == "box" {
-            let target_item = &layout.words[idx];
-            let word = &all_words[target_item.word_index];
-            
-            // Use calculated box rect from core engine
-            if let Some(box_rect) = frame_state.box_rect {
-                let box_h = box_rect.h;
-                let box_radius = box_h * 0.2; // Dynamic radius
-                
-                println!("[RUST] Drawing box rect: x={}, y={}, w={}, h={}", box_rect.x, box_rect.y, box_rect.w, box_rect.h);
-                // Use highlight_color for the box background
-                draw_rounded_rect_mut(&mut image, box_rect, box_radius, col_highlight);
-            }
-            
-            // Draw Active Word
-            let x = target_item.rect.x as i32;
-            let y = target_item.rect.y as i32;
-            let scaled_scale = Scale::uniform(font_size as f32);
-            
-            println!("[RUST] Drawing active text '{}' for box style at ({},{})", word.text, x, y);
-            // Use text_color (col_text) for active text inside box
-            draw_text_mut(&mut image, col_text, x, y, scaled_scale, &font, &word.text);
-
-        } else {
-            // Colored / Scaling
-            let item = &layout.words[idx];
-            let word = &all_words[item.word_index];
-            
-            let x = item.rect.x as i32;
-            let y = item.rect.y as i32;
-            
-            let effect_scale = if style == "scaling" { 1.25 } else { 1.1 };
-            let final_scale = Scale::uniform((font_size * effect_scale) as f32);
-            
-            let (w_orig, h_orig) = measurer.measure_text(&word.text, font_size);
-            let (w_new, h_new) = measurer.measure_text(&word.text, font_size * effect_scale);
-            let offset_x = (w_new - w_orig) / 2.0;
-            let offset_y = (h_new - h_orig) / 2.0;
-            
-            let draw_x = x - offset_x as i32;
-            let draw_y = y - offset_y as i32;
-
-            println!("[RUST] Drawing active text '{}' for colored/scaling style at ({},{})", word.text, draw_x, draw_y);
-            // Stroke
-            let stroke_dist = (font_size * 0.05).ceil() as i32;
-            for oy in -stroke_dist..=stroke_dist {
-                for ox in -stroke_dist..=stroke_dist {
-                    if ox == 0 && oy == 0 { continue; }
-                    draw_text_mut(&mut image, col_black, draw_x + ox, draw_y + oy, final_scale, &font, &word.text);
-                }
-            }
-
-            // Fill
-            draw_text_mut(&mut image, col_highlight, draw_x, draw_y, final_scale, &font, &word.text);
-        }
-    }
-
-    Ok(image.into_vec())
+    Ok(output_images)
 }
 
 #[pymodule]
-fn rust_caption(m: &Bound<'_, PyModule>) -> PyResult<()> {
-    m.add_function(wrap_pyfunction!(render_mask_v2, m)?)?;
+fn rust_caption(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
+    m.add_function(wrap_pyfunction!(render_tiktok_batch, m)?)?;
+    #[cfg(feature = "gpu")]
+    m.add_function(wrap_pyfunction!(render_gpu, m)?)?;
     Ok(())
 }
