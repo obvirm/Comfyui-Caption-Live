@@ -1,0 +1,107 @@
+--- New Render Call ---
+Image Shape: torch.Size([1, 768, 768, 3])
+CaptionLive: Rust backend loaded successfully.
+Font Path: C:\Windows\Fonts\arial.ttf (Exists: True)
+Rendering Params: W=768, H=768, Scale=3.66, FontSize=204.8
+Rust Render Error (Frame 0): render_mask() takes 9 positional arguments but 12 were given
+Render Complete. Success: 0, Errors: 1
+--- New Render Call ---
+Image Shape: torch.Size([1, 768, 768, 3])
+CaptionLive: Rust backend loaded successfully.
+Font Path: C:\Windows\Fonts\arial.ttf (Exists: True)
+Rendering Params: W=768, H=768, Scale=3.66, FontSize=204.8
+Rust Render Error (Frame 0): module 'rust_caption' has no attribute 'render_mask_v2'
+Render Complete. Success: 0, Errors: 1
+--- New Render Call ---
+Image Shape: torch.Size([1, 768, 768, 3])
+CaptionLive: Rust backend loaded successfully from E:\Ai\ComfyUI\comfypy\Lib\site-packages\rust_caption\__init__.py.
+Font Path: C:\Windows\Fonts\arial.ttf (Exists: True)
+Rendering Params: W=768, H=768, Scale=3.66, FontSize=204.8
+Rust Render Error (Frame 0): module 'rust_caption' has no attribute 'render_mask_v2'
+Render Complete. Success: 0, Errors: 1
+--- New Render Call ---
+Image Shape: torch.Size([1, 768, 768, 3])
+CaptionLive: Rust backend loaded successfully from E:\Ai\ComfyUI\ComfyUI\custom_nodes\caption-live\rust_caption.pyd.
+Font Path: C:\Windows\Fonts\arial.ttf (Exists: True)
+Rendering Params: W=768, H=768, Scale=3.66, FontSize=204.8
+Rust Buffer Size: 2359296 bytes
+Buffer Max Value: 255
+Render Complete. Success: 1, Errors: 0
+--- New Render Call ---
+Image Shape: torch.Size([1, 768, 768, 3])
+Font Path: C:\Windows\Fonts\arial.ttf (Exists: True)
+Rendering Params: W=768, H=768, Scale=3.66, FontSize=204.8
+Rust Buffer Size: 2359296 bytes
+Buffer Max Value: 255
+Render Complete. Success: 1, Errors: 0
+--- New Render Call ---
+Image Shape: torch.Size([192, 720, 1280, 3])
+Font Path: C:\Windows\Fonts\arial.ttf (Exists: True)
+Rendering Params: W=1280, H=720, Scale=6.10, FontSize=341.3
+Rust Buffer Size: 3686400 bytes
+Buffer Max Value: 0
+--- New Render Call ---
+Image Shape: torch.Size([192, 720, 1280, 3])
+CaptionLive: Rust backend loaded successfully from E:\Ai\ComfyUI\ComfyUI\custom_nodes\caption-live\rust_caption.pyd.
+Font Path: C:\Windows\Fonts\arial.ttf (Exists: True)
+Input Segments (raw): arial.ttf
+Segments JSON sent to Rust: [{"start": 0.0, "end": 1.0, "text": "Hello"},{"start": 1.0, "end": 2.0, "text": "World"}]
+Rendering Params: W=1280, H=720, Scale=6.10, FontSize=341.3
+Rust Buffer Size: 3686400 bytes
+Buffer Max Value: 0
+--- New Render Call ---
+Image Shape: torch.Size([192, 720, 1280, 3])
+CaptionLive: Rust backend loaded successfully from E:\Ai\ComfyUI\ComfyUI\custom_nodes\caption-live\rust_caption.pyd.
+Font Path: C:\Windows\Fonts\arial.ttf (Exists: True)
+Input Segments (raw): arial.ttf
+Segments JSON sent to Rust: [{"start": 0.0, "end": 1.0, "text": "Hello"},{"start": 1.0, "end": 2.0, "text": "World"}]
+Rendering Params: W=1280, H=720, Scale=6.10, FontSize=341.3
+Rust Buffer Size: 3686400 bytes
+Buffer Max Value: 0
+Render Complete. Success: 192, Errors: 0
+--- New Render Call ---
+Image Shape: torch.Size([1, 768, 768, 3])
+Font Path: C:\Windows\Fonts\arial.ttf (Exists: True)
+Input Segments (raw): arial.ttf
+Segments JSON sent to Rust: [{"start": 0.0, "end": 1.0, "text": "Hello"},{"start": 1.0, "end": 2.0, "text": "World"}]
+Rendering Params: W=768, H=768, Scale=3.66, FontSize=204.8
+Rust Buffer Size: 2359296 bytes
+Buffer Max Value: 255
+Render Complete. Success: 1, Errors: 0
+--- New Render Call ---
+Image Shape: torch.Size([1, 768, 768, 3])
+Font Path: C:\Windows\Fonts\arial.ttf (Exists: True)
+Input Segments (raw): arial.ttf
+Segments JSON sent to Rust: [{"start": 0.0, "end": 1.0, "text": "Hello"},{"start": 1.0, "end": 2.0, "text": "World"}]
+Rendering Params: W=768, H=768, Scale=3.66, FontSize=204.8
+Rust Buffer Size: 2359296 bytes
+Buffer Max Value: 255
+Render Complete. Success: 1, Errors: 0
+--- New Render Call ---
+Image Shape: torch.Size([192, 720, 1280, 3])
+CaptionLive: Rust backend loaded successfully from E:\Ai\ComfyUI\ComfyUI\custom_nodes\caption-live\rust_caption.pyd.
+Font Path: C:\Windows\Fonts\arial.ttf (Exists: True)
+Input Segments (raw): arial.ttf
+Segments JSON sent to Rust: [{"start": 0.0, "end": 1.0, "text": "Hello"},{"start": 1.0, "end": 2.0, "text": "World"}]
+Rendering Params: W=1280, H=720, Scale=6.10, FontSize=341.3
+Rust Buffer Size: 3686400 bytes
+Buffer Max Value: 0
+Render Complete. Success: 192, Errors: 0
+--- New Render Call ---
+Image Shape: torch.Size([192, 720, 1280, 3])
+Font Path: C:\Windows\Fonts\arial.ttf (Exists: True)
+Input Segments (raw): arial.ttf
+Segments JSON sent to Rust: [{"start": 0.0, "end": 1.0, "text": "Hello"},{"start": 1.0, "end": 2.0, "text": "World"}]
+Rendering Params: W=1280, H=720, Scale=6.10, FontSize=65.2
+Rust Buffer Size: 3686400 bytes
+Buffer Max Value: 255
+Render Complete. Success: 192, Errors: 0
+--- New Render Call ---
+Image Shape: torch.Size([192, 720, 1280, 3])
+Font Path: C:\Windows\Fonts\arial.ttf (Exists: True)
+Input Segments (raw): arial.ttf
+Segments JSON sent to Rust: [{"start": 0.0, "end": 1.0, "text": "Hello"},{"start": 1.0, "end": 2.0, "text": "World"}]
+Rendering Params: W=1280, H=720, Scale=6.10, FontSize=65.2
+Rust Buffer Size: 3686400 bytes
+Buffer Max Value: 255
+Render Complete. Success: 192, Errors: 0

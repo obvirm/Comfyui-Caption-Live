@@ -68,7 +68,7 @@ impl CaptionEngine {
         ctx.close_path();
     }
 
-    pub fn draw_frame(&self, ctx: &CanvasRenderingContext2d, width: f64, height: f64, time: f64, style: &str, font_size_px: f64, pos_x: f64, pos_y: f64) {
+    pub fn draw_frame(&self, ctx: &CanvasRenderingContext2d, width: f64, height: f64, time: f64, style: &str, font_size_px: f64, pos_x: f64, pos_y: f64, highlight_color: &str, text_color: &str) {
         // Fill with black background
         ctx.set_fill_style(&JsValue::from_str("#000000"));
         ctx.fill_rect(0.0, 0.0, width, height);
@@ -110,15 +110,29 @@ impl CaptionEngine {
         let frame_state = engine.calculate_frame(&layout, time);
         let active_idx = frame_state.active_word_index;
 
-        // Passive text
-        ctx.set_fill_style(&JsValue::from_str("white"));
+        // STEP 1: Draw Active Box (Background Layer)
+        if let Some(idx) = active_idx {
+            if style == "box" {
+                if let Some(box_rect) = frame_state.box_rect {
+                    let box_h = box_rect.h;
+                    let box_radius = box_h * 0.2;
+
+                    ctx.set_fill_style(&JsValue::from_str(highlight_color));
+                    self.path_round_rect(ctx, box_rect.x, box_rect.y, box_rect.w, box_rect.h, box_radius);
+                    ctx.fill();
+                }
+            }
+        }
+
+        // STEP 2: Draw Passive Text (Middle Layer)
+        ctx.set_fill_style(&JsValue::from_str(text_color));
         if style == "colored" || style == "scaling" {
-             ctx.set_fill_style(&JsValue::from_str("white")); 
+             ctx.set_fill_style(&JsValue::from_str(text_color)); 
         }
 
         for (i, item) in layout.words.iter().enumerate() {
             if let Some(active) = active_idx {
-                if i == active && (style == "scaling" || style == "colored") {
+                if i == active {
                     continue;
                 }
             }
@@ -126,44 +140,22 @@ impl CaptionEngine {
             let _ = ctx.fill_text(&word.text, item.rect.x, item.rect.y);
         }
 
-        // Active text/box
+        // STEP 3: Draw Active Text (Top Layer)
         if let Some(idx) = active_idx {
+            let item = &layout.words[idx];
+            let word = &self.words[item.word_index];
+            
             if style == "box" {
-                let target_item = &layout.words[idx];
-                let word = &self.words[target_item.word_index];
-                
-                if let Some(box_rect) = frame_state.box_rect {
-                    let box_h = box_rect.h;
-                    // Dynamic radius relative to box size (20%)
-                    let box_radius = box_h * 0.2; 
+                // Draw stroke first for better visibility
+                let stroke_width = font_size * 0.08;
+                ctx.set_line_width(stroke_width);
+                ctx.set_stroke_style(&JsValue::from_str("black"));
+                let _ = ctx.stroke_text(&word.text, item.rect.x, item.rect.y);
 
-                    ctx.set_fill_style(&JsValue::from_str("#007AFF"));
-                    self.path_round_rect(ctx, box_rect.x, box_rect.y, box_rect.w, box_rect.h, box_radius);
-                    ctx.fill();
-
-                    let _ = ctx.save();
-                    self.path_round_rect(ctx, box_rect.x, box_rect.y, box_rect.w, box_rect.h, box_radius);
-                    ctx.clip();
-
-                    ctx.set_fill_style(&JsValue::from_str("white"));
-                    for item in &layout.words {
-                        let word = &self.words[item.word_index];
-                        let item_box = Rect { 
-                            x: item.rect.x, y: item.rect.y - font_size, 
-                            w: item.rect.w, h: font_size * 2.0 
-                        };
-                        if item_box.x < box_rect.x + box_rect.w && item_box.x + item_box.w > box_rect.x &&
-                           item_box.y < box_rect.y + box_rect.h && item_box.y + item_box.h > box_rect.y {
-                               let _ = ctx.fill_text(&word.text, item.rect.x, item.rect.y);
-                           }
-                    }
-                    let _ = ctx.restore();
-                }
-
+                // Then fill with text color (usually white for box style, but user configurable)
+                ctx.set_fill_style(&JsValue::from_str(text_color));
+                let _ = ctx.fill_text(&word.text, item.rect.x, item.rect.y);
             } else {
-                let item = &layout.words[idx];
-                let word = &self.words[item.word_index];
-                
                 let _ = ctx.save();
                 let cx = item.rect.x + (item.rect.w / 2.0);
                 let cy = item.rect.y;
@@ -181,7 +173,7 @@ impl CaptionEngine {
                 ctx.set_stroke_style(&JsValue::from_str("black"));
                 let _ = ctx.stroke_text(&word.text, item.rect.x, item.rect.y);
 
-                ctx.set_fill_style(&JsValue::from_str("#39E55F"));
+                ctx.set_fill_style(&JsValue::from_str(highlight_color));
                 let _ = ctx.fill_text(&word.text, item.rect.x, item.rect.y);
                 
                 let _ = ctx.restore();

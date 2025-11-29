@@ -1,10 +1,10 @@
 [package]
-name = "rust_caption_v2"
+name = "rust_caption"
 version = "0.1.0"
 edition = "2021"
 
 [lib]
-name = "rust_caption_v2"
+name = "rust_caption"
 crate-type = ["cdylib"]
 
 [dependencies]

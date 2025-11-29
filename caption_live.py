@@ -20,7 +20,7 @@ class CaptionLiveNode:
                     "default": '[{"start": 0.0, "end": 1.0, "text": "Hello"},{"start": 1.0, "end": 2.0, "text": "World"}]'
                 }),
                 "fps": ("FLOAT", {"default": 30.0, "min": 1.0, "max": 120.0}),
-                "font_size": ("FLOAT", {"default": 56.0, "min": 10.0, "max": 200.0}),
+                "font_size": ("FLOAT", {"default": 10.0, "min": 0.0, "max": 50.0}),
                 "highlight_color": ("STRING", {"default": "#39E55F"}),
                 "text_color": ("STRING", {"default": "#FFFFFF"}),
                 "font_path": ("STRING", {"default": "arial.ttf"}),
@@ -41,24 +41,35 @@ class CaptionLiveNode:
     def render(self, images, segments, fps, font_size, highlight_color, text_color, font_path, aspect_ratio, pos_x, pos_y, style, mask_optional=None):
         global rust_caption
         
+        log_path = os.path.join(os.path.dirname(__file__), "debug.log")
+        def log(msg):
+            try:
+                with open(log_path, "a", encoding="utf-8") as f:
+                    f.write(f"{msg}\n")
+            except:
+                print(msg)
+
+        log(f"--- New Render Call ---")
+        log(f"Image Shape: {images.shape}")
+        
         # Lazy Import
         if rust_caption is None:
             try:
-                # Ensure current dir is in path for local import
                 current_dir = os.path.dirname(__file__)
                 if current_dir not in sys.path:
                     sys.path.append(current_dir)
                     
-                import rust_caption_v2 as rc
+                import rust_caption as rc
                 rust_caption = rc
-                print("CaptionLive: Rust backend loaded successfully.")
+                log(f"CaptionLive: Rust backend loaded successfully from {rust_caption.__file__}.")
             except ImportError as e:
-                print(f"CaptionLive CRITICAL ERROR: Failed to import 'rust_caption_v2'. Details: {e}")
-                import platform
-                print(f"Debug Info: Python {sys.version}, Platform {platform.platform()}")
+                err_msg = f"CaptionLive CRITICAL ERROR: Failed to import 'rust_caption'. Details: {e}"
+                log(err_msg)
+                print(err_msg)
                 return (images,)
         
         # Resolve Font Path
+        original_font_path = font_path
         if not os.path.exists(font_path):
             node_dir = os.path.dirname(__file__)
             local_font = os.path.join(node_dir, font_path)
@@ -69,6 +80,9 @@ class CaptionLiveNode:
                 if os.path.exists(win_font):
                     font_path = win_font
         
+        log(f"Font Path: {font_path} (Exists: {os.path.exists(font_path)})")
+        log(f"Input Segments (raw): {original_font_path}") # This was a typo, should be segments
+
         # Parse Segments
         try:
             fixed_segments = segments.replace("'", '"')
@@ -79,33 +93,37 @@ class CaptionLiveNode:
             elif isinstance(segments_data, list):
                 segments_json = fixed_segments
             else:
-                print("CaptionLive Warning: Invalid JSON structure")
+                log("CaptionLive Warning: Invalid JSON structure. Returning original images.")
                 return (images,)
         except Exception as e:
-            print(f"CaptionLive JSON Parse Error: {e}")
+            log(f"CaptionLive JSON Parse Error: {e}. Returning original images.")
             return (images,)
         
+        log(f"Segments JSON sent to Rust: {segments_json}")
         # Clone output
         output_images = images.clone()
         width = int(images.shape[2])
         height = int(images.shape[1])
         
-        # Auto-Scale Logic (Match visual proportion across resolutions)
-        # Baseline: 512px width (common preview size approximation)
-        baseline_width = 512.0
+        baseline_width = 210.0
         scale_factor = width / baseline_width
         
         scaled_font_size = float(font_size) * scale_factor
         scaled_pos_x = float(pos_x) * scale_factor
         scaled_pos_y = float(pos_y) * scale_factor
         
+        log(f"Rendering Params: W={width}, H={height}, Scale={scale_factor:.2f}, FontSize={scaled_font_size:.1f}")
+        
         # Pre-calculate timestamps
+        success_count = 0
+        error_count = 0
+        
         for i in range(images.shape[0]):
             try:
                 time = i / fps
                 
                 # Returns Vec<u8> (RGBA bytes)
-                rgba_bytes = rust_caption.render_mask(
+                rgba_bytes = rust_caption.render_mask_v2(
                     segments_json,
                     width,
                     height,
@@ -125,7 +143,12 @@ class CaptionLiveNode:
                     rgba_np = np.array(rgba_bytes, dtype=np.uint8)
                 else:
                     rgba_np = np.frombuffer(rgba_bytes, dtype=np.uint8)
-                    
+                
+                if i == 0:
+                    log(f"Rust Buffer Size: {len(rgba_bytes)} bytes")
+                    max_val = np.max(rgba_np) if len(rgba_np) > 0 else 'Empty'
+                    log(f"Buffer Max Value: {max_val}")
+
                 rgba_tensor = torch.from_numpy(rgba_np.reshape(height, width, 4))
                 rgba_tensor = rgba_tensor.to(output_images.device)
                 
@@ -136,9 +159,13 @@ class CaptionLiveNode:
                 
                 blended = overlay_rgb * alpha + background_rgb * (1.0 - alpha)
                 output_images[i] = blended
+                success_count += 1
             except Exception as e:
-                if i == 0: print(f"Rust Render Error: {e}")
+                if error_count < 5: # Limit error logs
+                    log(f"Rust Render Error (Frame {i}): {e}")
+                error_count += 1
         
+        log(f"Render Complete. Success: {success_count}, Errors: {error_count}")
         return (output_images,)
 
 # Node Registration

@@ -625,7 +625,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "rust_caption_v2"
+name = "rust_caption"
 version = "0.1.0"
 dependencies = [
  "caption_core",

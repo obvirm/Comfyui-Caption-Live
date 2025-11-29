@@ -50,12 +50,12 @@ fn draw_rounded_rect_mut(image: &mut RgbaImage, rect: Rect, radius: f64, color: 
 }
 
 #[pyfunction]
-fn render_mask(
+fn render_mask_v2(
     json_data: String,
     width: u32,
     height: u32,
     time: f64,
-    fps: f64,
+    _fps: f64,
     font_path: String,
     style: String,
     highlight_color: String,
@@ -68,9 +68,12 @@ fn render_mask(
     // 1. Load Font
     let font_data = fs::read(&font_path).map_err(|e| PyErr::new::<pyo3::exceptions::PyIOError, _>(format!("Failed to load font: {}", e)))?;
     let font = Font::try_from_vec(font_data).ok_or_else(|| PyErr::new::<pyo3::exceptions::PyValueError, _>("Error constructing font"))?;
+    println!("[RUST] Font loaded. Font_path: {}", font_path);
 
     // 2. Parse Data
+    println!("[RUST] Raw json_data received: {}", json_data);
     let segments: Vec<Segment> = serde_json::from_str(&json_data).map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(format!("JSON Error: {}", e)))?;
+    println!("[RUST] Segments parsed. Count: {}", segments.len());
     let mut all_words = Vec::new();
     for seg in segments {
         if let Some(words) = seg.words {
@@ -83,10 +86,18 @@ fn render_mask(
             });
         }
     }
+    println!("[RUST] All words collected. Count: {}", all_words.len());
+
+    // Check for empty words before proceeding
+    if all_words.is_empty() {
+        println!("[RUST] WARNING: No words found after parsing segments. Returning empty image.");
+        return Ok(RgbaImage::new(width, height).into_vec());
+    }
 
     // 3. Setup Engine & Layout
     let measurer = RusttypeMeasurer { font: &font };
     let engine = LayoutEngine::new(&all_words, &measurer);
+    println!("[RUST] LayoutEngine created with {} words.", all_words.len());
     
     // Layout Logic (Matching WASM v2)
     // Use actual pixel dimensions without arbitrary scaling
@@ -102,6 +113,7 @@ fn render_mask(
         w: w_f64 - (side_margin * 2.0),
         h: container_h,
     };
+    println!("[RUST] Container Rect: x={}, y={}, w={}, h={}", container.x, container.y, container.w, container.h);
     
     // Fixed font size requested by user
     let settings = LayoutSettings {
@@ -113,19 +125,27 @@ fn render_mask(
     
     let layout = engine.calculate_best_fit(settings);
     let font_size = layout.font_size;
+    println!("[RUST] Layout calculated. Layout words count: {}, Font Size: {}", layout.words.len(), layout.font_size);
+    if layout.words.is_empty() {
+        println!("[RUST] WARNING: Layout resulted in no words. Returning empty image.");
+        return Ok(RgbaImage::new(width, height).into_vec());
+    }
     
     // 4. Calculate Frame State (Animation & Active Word)
     let frame_state = engine.calculate_frame(&layout, time);
     let active_idx = frame_state.active_word_index;
+    println!("[RUST] Frame state calculated. Active idx: {:?}", active_idx);
 
     // 5. Render to Image
     let mut image = RgbaImage::new(width, height);
+    println!("[RUST] Image buffer created: {}x{} pixels", width, height);
     
     let col_text = Rgba(parse_hex_rgba(&text_color));
     let col_highlight = Rgba(parse_hex_rgba(&highlight_color));
-    let col_box = Rgba([0, 122, 255, 255]); // Blue
     let col_white = Rgba([255, 255, 255, 255]);
     let col_black = Rgba([0, 0, 0, 255]);
+
+    println!("[RUST] Colors - Text: {:?}, Highlight: {:?}", col_text, col_highlight);
 
     // A. Draw Passive Text
     // Use user-defined text_color for passive text instead of hardcoded black/white
@@ -133,7 +153,8 @@ fn render_mask(
     
     for (i, item) in layout.words.iter().enumerate() {
         if let Some(active) = active_idx {
-            if i == active && (style == "scaling" || style == "colored") {
+            // ALWAYS skip active word from passive drawing
+            if i == active {
                 continue;
             }
         }
@@ -143,11 +164,13 @@ fn render_mask(
         let y = item.rect.y as i32;
         let scaled_scale = Scale::uniform(font_size as f32);
 
+        println!("[RUST] Drawing passive text '{}' at ({},{})", word.text, x, y);
         draw_text_mut(&mut image, passive_color, x, y, scaled_scale, &font, &word.text);
     }
 
     // B. Draw Active Text & Box
     if let Some(idx) = active_idx {
+        println!("[RUST] Active word index: {}", idx);
         if style == "box" {
             let target_item = &layout.words[idx];
             let word = &all_words[target_item.word_index];
@@ -157,7 +180,9 @@ fn render_mask(
                 let box_h = box_rect.h;
                 let box_radius = box_h * 0.2; // Dynamic radius
                 
-                draw_rounded_rect_mut(&mut image, box_rect, box_radius, col_box);
+                println!("[RUST] Drawing box rect: x={}, y={}, w={}, h={}", box_rect.x, box_rect.y, box_rect.w, box_rect.h);
+                // Use highlight_color for the box background
+                draw_rounded_rect_mut(&mut image, box_rect, box_radius, col_highlight);
             }
             
             // Draw Active Word
@@ -165,7 +190,9 @@ fn render_mask(
             let y = target_item.rect.y as i32;
             let scaled_scale = Scale::uniform(font_size as f32);
             
-            draw_text_mut(&mut image, col_white, x, y, scaled_scale, &font, &word.text);
+            println!("[RUST] Drawing active text '{}' for box style at ({},{})", word.text, x, y);
+            // Use text_color (col_text) for active text inside box
+            draw_text_mut(&mut image, col_text, x, y, scaled_scale, &font, &word.text);
 
         } else {
             // Colored / Scaling
@@ -186,6 +213,7 @@ fn render_mask(
             let draw_x = x - offset_x as i32;
             let draw_y = y - offset_y as i32;
 
+            println!("[RUST] Drawing active text '{}' for colored/scaling style at ({},{})", word.text, draw_x, draw_y);
             // Stroke
             let stroke_dist = (font_size * 0.05).ceil() as i32;
             for oy in -stroke_dist..=stroke_dist {
@@ -204,7 +232,7 @@ fn render_mask(
 }
 
 #[pymodule]
-fn rust_caption_v2(m: &Bound<'_, PyModule>) -> PyResult<()> {
-    m.add_function(wrap_pyfunction!(render_mask, m)?)?;
+fn rust_caption(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    m.add_function(wrap_pyfunction!(render_mask_v2, m)?)?;
     Ok(())
 }

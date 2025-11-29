@@ -214,7 +214,7 @@ impl<'a, M: TextMeasurer> LayoutEngine<'a, M> {
             let target_item = &layout.words[idx];
             let word = &self.words[target_item.word_index];
             
-            let box_padding = font_size * 0.2;
+            let box_padding = font_size * 0.6; // Increased padding for safer fit
             let box_h = font_size * 1.4;
             let visual_offset_y = font_size * 0.05;
 

@@ -8,7 +8,8 @@ app.registerExtension({
 
             let CaptionEngine;
             try {
-                const modulePath = "/extensions/caption-live/js/pkg/caption_live_wasm.js";
+                // Cache busting to ensure latest WASM is loaded
+                const modulePath = "/extensions/caption-live/js/pkg/caption_live_wasm.js?v=" + Date.now();
                 const module = await import(modulePath);
 
                 const init = module.default;
@@ -59,6 +60,35 @@ app.registerExtension({
                 canvas.style.display = "block";
                 container.appendChild(canvas);
 
+                // --- Play/Pause Button ---
+                const playBtn = document.createElement("div");
+                playBtn.innerText = "⏸";
+                playBtn.style.position = "absolute";
+                playBtn.style.top = "5px";
+                playBtn.style.right = "5px";
+                playBtn.style.width = "24px";
+                playBtn.style.height = "24px";
+                playBtn.style.backgroundColor = "rgba(0,0,0,0.5)";
+                playBtn.style.color = "white";
+                playBtn.style.borderRadius = "50%";
+                playBtn.style.textAlign = "center";
+                playBtn.style.lineHeight = "24px";
+                playBtn.style.cursor = "pointer";
+                playBtn.style.fontSize = "12px";
+                playBtn.style.zIndex = "10";
+                playBtn.style.userSelect = "none";
+                
+                // Make container relative so absolute button works
+                container.style.position = "relative";
+                container.appendChild(playBtn);
+
+                let isPlaying = true;
+                playBtn.onclick = (e) => {
+                    e.stopPropagation(); // Prevent selecting node
+                    isPlaying = !isPlaying;
+                    playBtn.innerText = isPlaying ? "⏸" : "▶";
+                };
+
                 this.addDOMWidget("preview", "canvas", container, {
                     serialize: false,
                     hideOnZoom: false
@@ -95,12 +125,16 @@ app.registerExtension({
                     const fontSizeWidget = this.widgets?.find(w => w.name === "font_size");
                     const posXWidget = this.widgets?.find(w => w.name === "pos_x");
                     const posYWidget = this.widgets?.find(w => w.name === "pos_y");
+                    const highlightWidget = this.widgets?.find(w => w.name === "highlight_color");
+                    const textWidget = this.widgets?.find(w => w.name === "text_color");
 
                     let segmentsStr = segmentsWidget ? segmentsWidget.value : "[]";
                     const style = styleWidget ? styleWidget.value : "box";
                     const fontSizeRaw = fontSizeWidget ? fontSizeWidget.value : 56.0;
                     const posXRaw = posXWidget ? posXWidget.value : 0;
                     const posYRaw = posYWidget ? posYWidget.value : 0;
+                    const highlightColor = highlightWidget ? highlightWidget.value : "#39E55F";
+                    const textColor = textWidget ? textWidget.value : "#FFFFFF";
 
                     // Sanitize JSON input for WASM
                     try {
@@ -153,7 +187,7 @@ app.registerExtension({
                         canvas.height = targetHeight;
                     }
 
-                    if (engine) {
+                    if (isPlaying && engine) {
                         // Skip render if canvas is too small
                         if (canvas.width > 50 && canvas.height > 50) {
                             try {
@@ -168,7 +202,7 @@ app.registerExtension({
                                 const targetPosX = posXRaw * dpr;
                                 const targetPosY = posYRaw * dpr;
 
-                                engine.draw_frame(ctx, canvas.width, canvas.height, time, style, targetFontSizePx, targetPosX, targetPosY);
+                                engine.draw_frame(ctx, canvas.width, canvas.height, time, style, targetFontSizePx, targetPosX, targetPosY, highlightColor, textColor);
                             } catch (e) {
                                 console.warn("CaptionLive Render Error:", e);
                             }
