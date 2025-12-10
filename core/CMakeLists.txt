@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 project(CaptionEngine 
-    VERSION 1.0.0 
+    VERSION 2.0.0 
     LANGUAGES CXX
 )
 
@@ -16,6 +16,7 @@ option(BUILD_TESTS "Build unit tests" ON)
 option(ENABLE_CUDA "Enable CUDA backend" OFF)
 option(ENABLE_VULKAN "Enable Vulkan backend" OFF)
 option(ENABLE_METAL "Enable Metal backend (macOS)" OFF)
+option(ENABLE_UNIFIED_PIPELINE "Enable unified render pipeline" ON)
 
 # Output directories
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
@@ -49,9 +50,15 @@ set(EFFECTS_SOURCES
     src/effects/transitions.cpp
 )
 
-set(PLATFORM_SOURCES
-    src/platform/emscripten.cpp
-    src/platform/python.cpp
+set(GPU_SOURCES
+    # GPU Backend Abstraction - Added for unified pipeline
+    src/gpu/webgpu_backend.cpp
+)
+
+set(UNIFIED_PIPELINE_SOURCES
+    # Unified Render Pipeline
+    src/render_pipeline.cpp
+    src/text/sdf_generator.cpp
 )
 
 set(TEST_SOURCES
@@ -64,9 +71,11 @@ add_library(caption_engine STATIC
     ${TEST_SOURCES}
 )
 
-# WebGPU backend for WASM
-if(BUILD_WASM OR EMSCRIPTEN)
-    target_sources(caption_engine PRIVATE src/backends/webgpu_backend.cpp)
+# Add unified pipeline sources if enabled
+if(ENABLE_UNIFIED_PIPELINE)
+    target_sources(caption_engine PRIVATE ${UNIFIED_PIPELINE_SOURCES})
+    target_compile_definitions(caption_engine PUBLIC CAPTION_UNIFIED_PIPELINE=1)
+    message(STATUS "Unified Render Pipeline enabled")
 endif()
 
 target_include_directories(caption_engine PUBLIC
@@ -89,6 +98,10 @@ target_compile_definitions(caption_engine PUBLIC
 # =============================================================================
 if(BUILD_WASM OR EMSCRIPTEN)
     message(STATUS "Building WebAssembly target")
+    
+    # Add WebGPU backend for WASM
+    target_sources(caption_engine PRIVATE ${GPU_SOURCES})
+    target_compile_definitions(caption_engine PUBLIC HAS_WEBGPU=1)
     
     add_executable(caption_engine_wasm
         src/bindings/wasm_bindings.cpp
@@ -122,85 +135,26 @@ if(BUILD_WASM OR EMSCRIPTEN)
 endif()
 
 # =============================================================================
-# CUDA Backend (Optional)
+# Vulkan Backend (Native Desktop)
 # =============================================================================
-if(ENABLE_CUDA AND NOT EMSCRIPTEN)
-    enable_language(CUDA)
+if(ENABLE_VULKAN AND NOT EMSCRIPTEN)
+    find_package(Vulkan QUIET)
     
-    find_package(CUDAToolkit REQUIRED)
-    
-    message(STATUS "CUDA enabled - Building GPU acceleration backend")
-    
-    # CUDA sources
-    set(CUDA_SOURCES
-        src/compute/cuda_backend.cpp
-        src/cuda/effect_kernels.cu
-    )
-    
-    # Create CUDA library
-    add_library(caption_cuda STATIC ${CUDA_SOURCES})
-    
-    target_include_directories(caption_cuda PUBLIC
-        ${CMAKE_CURRENT_SOURCE_DIR}/include
-        ${CUDAToolkit_INCLUDE_DIRS}
-    )
-    
-    # CUDA compile options
-    set_target_properties(caption_cuda PROPERTIES
-        CUDA_SEPARABLE_COMPILATION ON
-        CUDA_ARCHITECTURES "60;70;75;80;86;89;90"
-        POSITION_INDEPENDENT_CODE ON
-    )
-    
-    target_compile_definitions(caption_cuda PUBLIC
-        CAPTION_HAS_CUDA=1
-    )
-    
-    # Link CUDA Runtime
-    target_link_libraries(caption_cuda PRIVATE
-        CUDA::cudart
-    )
-    
-    # Link caption_cuda to main engine if CUDA enabled
-    target_link_libraries(caption_engine PRIVATE caption_cuda)
-    target_compile_definitions(caption_engine PUBLIC CAPTION_HAS_CUDA=1)
-    
-endif()
-
-# =============================================================================
-# Python Bindings
-# =============================================================================
-if(BUILD_PYTHON AND NOT EMSCRIPTEN)
-    find_package(Python3 COMPONENTS Interpreter Development REQUIRED)
-    
-    # Find pybind11 via pip installation
-    execute_process(
-        COMMAND ${Python3_EXECUTABLE} -c "import pybind11; print(pybind11.get_cmake_dir())"
-        OUTPUT_VARIABLE PYBIND11_CMAKE_DIR
-        OUTPUT_STRIP_TRAILING_WHITESPACE
-        RESULT_VARIABLE PYBIND11_RESULT
-    )
-    
-    if(PYBIND11_RESULT EQUAL 0)
-        list(APPEND CMAKE_PREFIX_PATH ${PYBIND11_CMAKE_DIR})
-        find_package(pybind11 CONFIG REQUIRED)
-        
-        pybind11_add_module(caption_engine_py src/bindings/python_bindings.cpp)
-        target_link_libraries(caption_engine_py PRIVATE caption_engine)
-        target_include_directories(caption_engine_py PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
-        
-        # Copy to parent directory for easy import
-        add_custom_command(TARGET caption_engine_py POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:caption_engine_py> ${CMAKE_CURRENT_SOURCE_DIR}/../caption_engine_py.pyd
+    if(Vulkan_FOUND)
+        target_sources(caption_engine PRIVATE
+            src/gpu/vulkan_backend.cpp
         )
-        message(STATUS "pybind11 found, Python bindings enabled")
+        target_include_directories(caption_engine PRIVATE ${Vulkan_INCLUDE_DIRS})
+        target_link_libraries(caption_engine PRIVATE Vulkan::Vulkan)
+        target_compile_definitions(caption_engine PUBLIC HAS_VULKAN=1)
+        message(STATUS "Vulkan backend enabled - ${Vulkan_LIBRARY}")
     else()
-        message(WARNING "pybind11 not found via pip, Python bindings disabled")
+        message(WARNING "Vulkan not found, Vulkan backend disabled. Install Vulkan SDK.")
     endif()
 endif()
 
 # =============================================================================
-# CUDA Backend
+# CUDA Backend (NVIDIA GPU Compute)
 # =============================================================================
 if(ENABLE_CUDA AND NOT EMSCRIPTEN)
     find_package(CUDAToolkit QUIET)
@@ -208,59 +162,111 @@ if(ENABLE_CUDA AND NOT EMSCRIPTEN)
     if(CUDAToolkit_FOUND)
         enable_language(CUDA)
         
+        # CUDA source files
         add_library(caption_cuda STATIC
-            src/backends/cuda_backend.cu
+            src/gpu/cuda_backend.cu
+        )
+        
+        target_include_directories(caption_cuda PUBLIC
+            ${CMAKE_CURRENT_SOURCE_DIR}/include
+            ${CUDAToolkit_INCLUDE_DIRS}
         )
         
         set_target_properties(caption_cuda PROPERTIES
             CUDA_SEPARABLE_COMPILATION ON
-            CUDA_ARCHITECTURES "60;70;75;80;86;89;90"  # Updated for RTX 40 series
+            CUDA_ARCHITECTURES "60;70;75;80;86;89;90"  # Pascal to Ada Lovelace
+            POSITION_INDEPENDENT_CODE ON
         )
         
-        target_link_libraries(caption_engine PUBLIC caption_cuda)
+        target_compile_definitions(caption_cuda PUBLIC HAS_CUDA=1)
         target_link_libraries(caption_cuda PRIVATE CUDA::cudart)
+        
+        # Link CUDA to main engine
+        target_link_libraries(caption_engine PUBLIC caption_cuda)
         target_compile_definitions(caption_engine PUBLIC HAS_CUDA=1)
-        message(STATUS "CUDA backend enabled")
+        
+        message(STATUS "CUDA backend enabled - Architectures: 60-90")
     else()
         message(WARNING "CUDA Toolkit not found, CUDA backend disabled")
     endif()
 endif()
 
 # =============================================================================
-# Vulkan Backend
-# =============================================================================
-if(ENABLE_VULKAN AND NOT EMSCRIPTEN)
-    find_package(Vulkan QUIET)
-    
-    if(Vulkan_FOUND)
-        target_sources(caption_engine PRIVATE
-            src/backends/vulkan_backend.cpp
-        )
-        target_link_libraries(caption_engine PRIVATE Vulkan::Vulkan)
-        target_compile_definitions(caption_engine PUBLIC HAS_VULKAN=1)
-        message(STATUS "Vulkan backend enabled")
-    else()
-        message(WARNING "Vulkan not found, Vulkan backend disabled")
-    endif()
-endif()
-
-# =============================================================================
-# Metal Backend (macOS)
+# Metal Backend (macOS/iOS)
 # =============================================================================
 if(ENABLE_METAL AND APPLE AND NOT EMSCRIPTEN)
     find_library(METAL_LIBRARY Metal)
     find_library(METALKIT_LIBRARY MetalKit)
+    find_library(FOUNDATION_LIBRARY Foundation)
     
     if(METAL_LIBRARY AND METALKIT_LIBRARY)
         target_sources(caption_engine PRIVATE
-            src/backends/metal_backend.mm
+            src/gpu/metal_backend.mm
         )
         target_link_libraries(caption_engine PRIVATE 
             ${METAL_LIBRARY} 
             ${METALKIT_LIBRARY}
+            ${FOUNDATION_LIBRARY}
         )
         target_compile_definitions(caption_engine PUBLIC HAS_METAL=1)
         message(STATUS "Metal backend enabled")
+    else()
+        message(WARNING "Metal framework not found")
+    endif()
+endif()
+
+# =============================================================================
+# Python Bindings
+# =============================================================================
+if(BUILD_PYTHON AND NOT EMSCRIPTEN)
+    find_package(Python3 COMPONENTS Interpreter Development NumPy QUIET)
+    
+    if(Python3_FOUND)
+        # Find pybind11 via pip installation
+        execute_process(
+            COMMAND ${Python3_EXECUTABLE} -c "import pybind11; print(pybind11.get_cmake_dir())"
+            OUTPUT_VARIABLE PYBIND11_CMAKE_DIR
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+            RESULT_VARIABLE PYBIND11_RESULT
+        )
+        
+        if(PYBIND11_RESULT EQUAL 0)
+            list(APPEND CMAKE_PREFIX_PATH ${PYBIND11_CMAKE_DIR})
+            find_package(pybind11 CONFIG REQUIRED)
+            
+            # Legacy Python bindings (caption_engine_py)
+            pybind11_add_module(caption_engine_py src/bindings/python_bindings.cpp)
+            target_link_libraries(caption_engine_py PRIVATE caption_engine)
+            target_include_directories(caption_engine_py PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+            
+            # Copy to parent directory for easy import
+            add_custom_command(TARGET caption_engine_py POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:caption_engine_py> ${CMAKE_CURRENT_SOURCE_DIR}/../caption_engine_py.pyd
+            )
+            
+            # Unified Pipeline Python bindings (caption_engine_unified)
+            if(ENABLE_UNIFIED_PIPELINE)
+                pybind11_add_module(caption_engine_unified src/bindings/unified_bindings.cpp)
+                target_link_libraries(caption_engine_unified PRIVATE caption_engine)
+                target_include_directories(caption_engine_unified PRIVATE 
+                    ${CMAKE_CURRENT_SOURCE_DIR}/include
+                    ${Python3_NumPy_INCLUDE_DIRS}
+                )
+                
+                # Copy unified module to parent
+                add_custom_command(TARGET caption_engine_unified POST_BUILD
+                    COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:caption_engine_unified> ${CMAKE_CURRENT_SOURCE_DIR}/../caption_engine_unified.pyd
+                )
+                
+                message(STATUS "Unified Pipeline Python bindings enabled")
+            endif()
+            
+            message(STATUS "Python bindings enabled - Python ${Python3_VERSION}")
+        else()
+            message(WARNING "pybind11 not found via pip, Python bindings disabled")
+        endif()
+    else()
+        message(WARNING "Python3 not found, Python bindings disabled")
     endif()
 endif()
 
@@ -287,13 +293,21 @@ install(DIRECTORY include/ DESTINATION include)
 # Build Summary
 # =============================================================================
 message(STATUS "")
-message(STATUS "=== Caption Engine Build Configuration ===")
-message(STATUS "  Build Type:      ${CMAKE_BUILD_TYPE}")
-message(STATUS "  WASM:            ${BUILD_WASM}")
-message(STATUS "  Python:          ${BUILD_PYTHON}")
-message(STATUS "  CUDA:            ${ENABLE_CUDA}")
-message(STATUS "  Vulkan:          ${ENABLE_VULKAN}")
-message(STATUS "  Metal:           ${ENABLE_METAL}")
-message(STATUS "  Tests:           ${BUILD_TESTS}")
-message(STATUS "================================================")
-
+message(STATUS "╔═══════════════════════════════════════════════════╗")
+message(STATUS "║      Caption Engine Build Configuration           ║")
+message(STATUS "╠═══════════════════════════════════════════════════╣")
+message(STATUS "║  Version:        ${PROJECT_VERSION}                            ║")
+message(STATUS "║  Build Type:     ${CMAKE_BUILD_TYPE}                          ║")
+message(STATUS "╠═══════════════════════════════════════════════════╣")
+message(STATUS "║  Targets:                                         ║")
+message(STATUS "║    WASM:         ${BUILD_WASM}                              ║")
+message(STATUS "║    Python:       ${BUILD_PYTHON}                               ║")
+message(STATUS "║    Tests:        ${BUILD_TESTS}                               ║")
+message(STATUS "╠═══════════════════════════════════════════════════╣")
+message(STATUS "║  GPU Backends:                                    ║")
+message(STATUS "║    Unified:      ${ENABLE_UNIFIED_PIPELINE}                               ║")
+message(STATUS "║    CUDA:         ${ENABLE_CUDA}                              ║")
+message(STATUS "║    Vulkan:       ${ENABLE_VULKAN}                              ║")
+message(STATUS "║    Metal:        ${ENABLE_METAL}                              ║")
+message(STATUS "╚═══════════════════════════════════════════════════╝")
+message(STATUS "")

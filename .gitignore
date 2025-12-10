@@ -53,3 +53,6 @@ lib/**/*.pyd
 
 # Local agent files
 .agent/
+
+# Emscripten SDK (600MB+)
+core/emsdk/
