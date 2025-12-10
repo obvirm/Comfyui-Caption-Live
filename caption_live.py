@@ -145,43 +145,52 @@ class CaptionLiveNode:
             print("❌ No caption backend available!")
             return (images,)
 
-        batch_size, height, width, _ = images.shape
+        batch_size, height, width, channels = images.shape
         output_images = []
 
-        # Build template
+        # Build template JSON (Scene Description)
         template_json = self.build_template(
             width, height, duration, text, font_size,
             style, highlight_color, text_color, stroke_color,
             stroke_width, pos_x, pos_y, segments
         )
 
-        # Render loop
+        # Render loop - using unified process_frame API
         for i in range(batch_size):
             progress = i / max(batch_size - 1, 1)
             current_time = progress * duration
 
             try:
-                # Start with input image
-                input_img = images[i].clone()
-                if input_img.shape[2] == 3:  # RGB -> RGBA
-                    input_img = torch.cat([input_img, torch.ones((height, width, 1))], dim=2)
+                # Get input frame as contiguous numpy array
+                input_np = images[i].cpu().numpy().astype(np.float32)
                 
-                result = input_img
-
-                # Render caption using C++ caption_engine
-                if cpp_engine is not None:
+                # Ensure RGBA (4 channels)
+                if input_np.shape[2] == 3:
+                    alpha_channel = np.ones((height, width, 1), dtype=np.float32)
+                    input_np = np.concatenate([input_np, alpha_channel], axis=2)
+                
+                # Use unified process_frame API (compositing in C++)
+                # This is faster as C++ handles both rendering and compositing
+                if hasattr(backend, 'process_frame'):
+                    # New unified API: C++ does render + composite
+                    result_np = backend.process_frame(template_json, current_time, input_np)
+                    result_tensor = torch.from_numpy(result_np)
+                else:
+                    # Fallback: Old API with Python compositing
                     frame = cpp_engine.render_frame(template_json, current_time)
                     caption_np = np.frombuffer(bytes(frame.pixels), dtype=np.uint8)
                     caption_np = caption_np.reshape((frame.height, frame.width, 4)).astype(np.float32) / 255.0
-                    caption_tensor = torch.from_numpy(caption_np)
-                else:
-                    raise RuntimeError("C++ Caption Engine not loaded!")
+                    
+                    # Alpha composite in Python
+                    alpha = caption_np[:, :, 3:4]
+                    result_np = caption_np * alpha + input_np * (1 - alpha)
+                    result_tensor = torch.from_numpy(result_np)
                 
-                # Alpha composite caption over input
-                alpha = caption_tensor[:, :, 3:4]
-                result = caption_tensor * alpha + result * (1 - alpha)
+                # Convert back to RGB if input was RGB
+                if channels == 3:
+                    result_tensor = result_tensor[:, :, :3]
                 
-                output_images.append(result)
+                output_images.append(result_tensor)
                 
             except Exception as e:
                 print(f"Render Error Frame {i}: {e}")
@@ -192,114 +201,13 @@ class CaptionLiveNode:
         return (torch.stack(output_images),)
 
 
-class CaptionLiveGPUNode:
-    @classmethod
-    def INPUT_TYPES(cls):
-        # List available effect definitions
-        effects_dir = os.path.join(os.path.dirname(__file__), "caption_engine", "src", "effects", "definitions")
-        effect_files = ["custom"]
-        if os.path.exists(effects_dir):
-            effect_files += [f.replace(".yaml", "") for f in os.listdir(effects_dir) if f.endswith(".yaml")]
-
-        return {
-            "required": {
-                "images": ("IMAGE",),
-                "effect_name": (effect_files, {"default": "chromatic_aberration"}),
-            },
-            "optional": {
-                "custom_yaml": ("STRING", {"multiline": True, "default": "", "placeholder": "Paste custom YAML here if effect_name is 'custom'"}),
-                "param1": ("FLOAT", {"default": 0.5, "min": 0.0, "max": 10.0, "step": 0.01}),
-                "param2": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 10.0, "step": 0.01}),
-                "param3": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 10.0, "step": 0.01}),
-            }
-        }
-
-    RETURN_TYPES = ("IMAGE",)
-    FUNCTION = "apply_effect"
-    CATEGORY = "Caption Live/GPU"
-
-    def apply_effect(self, images, effect_name, custom_yaml="", param1=0.5, param2=0.0, param3=0.0):
-        backend = load_caption_backend()
-        if not hasattr(backend, 'GPUManager'):
-            print("❌ GPU Backend not available")
-            return (images,)
-
-        try:
-            # Determine YAML source
-            yaml_source = custom_yaml
-            if effect_name != "custom":
-                yaml_path = os.path.join(os.path.dirname(__file__), "caption_engine", "src", "effects", "definitions", f"{effect_name}.yaml")
-                if os.path.exists(yaml_path):
-                    with open(yaml_path, "r") as f:
-                        yaml_source = f.read()
-                else:
-                    print(f"⚠️ Effect file not found: {yaml_path}")
-            
-            if not yaml_source.strip():
-                print("⚠️ No effect definition provided")
-                return (images,)
-
-            # Initialize GPU Context
-            manager = backend.GPUManager()
-            
-            # Compile & Load
-            # print("⚙️ Compiling Effect...")
-            wgsl = backend.compile_effect(yaml_source)
-            manager.load_effect(wgsl)
-            
-            results = []
-            batch_size, height, width, channels = images.shape
-            
-            # print(f"🚀 Processing {batch_size} frames on GPU...")
-            
-            for i in range(batch_size):
-                # Ensure RGBA (4 channels)
-                img = images[i]
-                if channels == 3:
-                    # Pad with Alpha=1.0
-                    alpha = torch.ones((height, width, 1), dtype=img.dtype, device=img.device)
-                    img = torch.cat((img, alpha), dim=2)
-                
-                # Parameters
-                params = [param1, param2, param3] 
-                
-                # --- Zero-Copy Optimization ---
-                # Convert tensor to bytes (must be contiguous)
-                # Note: We ensure float32 type
-                input_bytes = img.contiguous().cpu().numpy().tobytes()
-                
-                # Execute on GPU with Buffer (Zero-Copy In)
-                # Returns raw bytes (Vec<u8>)
-                output_bytes = manager.execute_buffer(input_bytes, params, width, height)
-                
-                # Zero-Copy Out: Create tensor from bytes
-                # frombuffer creates a read-only tensor sharing memory, clone to make it writable/standard
-                # We need to specify count explicitly or reshape
-                out_tensor = torch.frombuffer(bytearray(output_bytes), dtype=torch.float32).reshape(height, width, 4).clone()
-                
-                # If input was RGB, discard alpha
-                if channels == 3:
-                    out_tensor = out_tensor[:, :, :3]
-                    
-                results.append(out_tensor)
-                
-            return (torch.stack(results),)
-            
-        except Exception as e:
-            print(f"❌ GPU Execution Failed: {e}")
-            import traceback
-            traceback.print_exc()
-            return (images,)
-
-
+# Single unified node with C++ backend
 NODE_CLASS_MAPPINGS = {
     "CaptionLiveNode": CaptionLiveNode,
-    "CaptionLiveGPUNode": CaptionLiveGPUNode
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
     "CaptionLiveNode": "Caption Live",
-    "CaptionLiveGPUNode": "Caption Live (GPU Compute)"
 }
 
 # ============================================================================
