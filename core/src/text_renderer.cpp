@@ -1,84 +1,44 @@
 /**
  * @file text_renderer.cpp
- * @brief Text rendering using stb_truetype
+ * @brief Text rendering using stb_truetype with EMBEDDED font
+ *
+ * UNIFIED ENGINE: Same code compiles to WASM and .pyd
+ * Font is embedded in binary - no file I/O needed!
  */
 
+#include "core/embedded_font.hpp" // Embedded Roboto-Bold font data
 #include "engine/renderer.hpp"
+
 
 #define STB_TRUETYPE_IMPLEMENTATION
 #include <stb/stb_truetype.h>
 
 #include <cmath>
-#include <filesystem>
-#include <fstream>
 #include <iostream>
 #include <vector>
 
 namespace CaptionEngine {
 
-// Embedded font data (Inter Black) - loaded from file
-static std::vector<uint8_t> g_font_buffer;
+// Font state
 static stbtt_fontinfo g_font_info;
 static bool g_font_initialized = false;
 
-// Initialize font from embedded data or file
+// Initialize font from EMBEDDED data (guaranteed to work everywhere)
 static bool init_font() {
   if (g_font_initialized)
     return true;
 
-  // Try to load font from various locations
-  // ComfyUI runs from ComfyUI root, so paths are relative to that
-  std::vector<std::string> font_paths = {
-      // Windows backslash paths (most reliable on Windows)
-      "custom_nodes\\caption-live\\core\\assets\\Roboto-Bold.ttf",
-      "core\\assets\\Roboto-Bold.ttf",
-      // Forward slash paths
-      "custom_nodes/caption-live/core/assets/Roboto-Bold.ttf",
-      "core/assets/Roboto-Bold.ttf",
-      "assets/Roboto-Bold.ttf",
-      // Absolute path (guaranteed to work)
-      "E:\\Ai\\ComfyUI\\ComfyUI\\custom_nodes\\caption-"
-      "live\\core\\assets\\Roboto-Bold.ttf",
-      // System fonts (Windows fallback)
-      "C:\\Windows\\Fonts\\arial.ttf",
-      "C:\\Windows\\Fonts\\arialbd.ttf",
-      "C:\\Windows\\Fonts\\segoeui.ttf",
-  };
+  std::cout << "� Initializing EMBEDDED font (" << EMBEDDED_FONT_SIZE
+            << " bytes)..." << std::endl;
 
-  for (const auto &path : font_paths) {
-    if (std::filesystem::exists(path)) {
-      std::cout << "🔍 Found font file: " << path << std::endl;
-      std::ifstream file(path, std::ios::binary);
-      if (file) {
-        file.seekg(0, std::ios::end);
-        size_t size = file.tellg();
-        file.seekg(0, std::ios::beg);
-
-        std::cout << "📦 File size: " << size << " bytes" << std::endl;
-
-        if (size == 0) {
-          std::cerr << "❌ File is empty!" << std::endl;
-          continue;
-        }
-
-        g_font_buffer.resize(size);
-        file.read(reinterpret_cast<char *>(g_font_buffer.data()), size);
-
-        if (stbtt_InitFont(&g_font_info, g_font_buffer.data(), 0)) {
-          g_font_initialized = true;
-          std::cout << "✅ Font initialized successfully: " << path
-                    << std::endl;
-          return true;
-        } else {
-          std::cerr << "❌ stbtt_InitFont failed for: " << path << std::endl;
-        }
-      }
-    } else {
-      // std::cout << "⚠️ Font file not found: " << path << std::endl;
-    }
+  // Use embedded font data directly - no file I/O needed!
+  if (stbtt_InitFont(&g_font_info, EMBEDDED_FONT, 0)) {
+    g_font_initialized = true;
+    std::cout << "✅ Embedded font initialized successfully!" << std::endl;
+    return true;
   }
 
-  std::cerr << "❌ Failed to initialize any font!" << std::endl;
+  std::cerr << "❌ Failed to initialize embedded font!" << std::endl;
   return false;
 }
 
@@ -131,8 +91,6 @@ void draw_text_to_buffer(ImageBuffer &img, const std::string &text, float x,
               << std::endl;
     return;
   }
-  // std::cout << "✍️ Drawing text: '" << text << "' at (" << x << ", " << y <<
-  // ")" << std::endl;
 
   float scale = stbtt_ScaleForPixelHeight(&g_font_info, font_size);
 
