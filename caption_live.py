@@ -17,7 +17,7 @@ caption_backend = None
 cpp_engine = None  # New C++ engine instance
 
 def load_caption_backend():
-    """Load the C++ caption engine"""
+    """Load the unified GPU render pipeline (Vulkan > WebGPU > Legacy)"""
     global caption_backend, cpp_engine
     if caption_backend is not None:
         return caption_backend
@@ -26,16 +26,40 @@ def load_caption_backend():
     if current_dir not in sys.path:
         sys.path.insert(0, current_dir)
     
-    # C++ caption_engine_py only
+    # Try unified GPU pipeline first (Vulkan + CUDA)
+    try:
+        import caption_engine_unified as unified
+        pipeline = unified.get_pipeline()
+        
+        # Initialize with default target
+        target = unified.RenderTarget()
+        target.width = 1920
+        target.height = 1080
+        target.fps = 60.0
+        
+        if pipeline.initialize(target):
+            caption_backend = unified
+            cpp_engine = pipeline
+            print(f"✅ Unified GPU Pipeline Loaded!")
+            print(f"   Backend: {pipeline.backend_name()}")
+            print(f"   CUDA Acceleration: {'Yes' if pipeline.has_cuda() else 'No'}")
+            return caption_backend
+    except ImportError:
+        print("ℹ️ Unified pipeline not available, trying legacy...")
+    except Exception as e:
+        print(f"⚠️ Unified pipeline init failed: {e}")
+    
+    # Fallback to legacy C++ caption_engine_py
     try:
         import caption_engine_py
         cpp_engine = caption_engine_py.Engine()
         caption_backend = caption_engine_py
-        print(f"✅ C++ Caption Engine Loaded! Backend: {cpp_engine.current_backend()}")
+        print(f"✅ Legacy C++ Engine Loaded! Backend: {cpp_engine.current_backend()}")
         return caption_backend
     except ImportError as e:
-        print(f"❌ C++ Caption Engine not found: {e}")
-        print("   Please build the C++ engine: cd caption_engine_cpp && ./build_python.ps1")
+        print(f"❌ No caption engine found: {e}")
+        print("   Build unified: cmake --build core/build --config Release")
+        print("   Or legacy: cd core && ./build_python.ps1")
         return None
 
 

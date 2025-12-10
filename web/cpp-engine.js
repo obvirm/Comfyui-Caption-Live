@@ -1,132 +1,184 @@
 /**
- * C++ Caption Engine WASM Integration
+ * C++ Caption Engine WASM Integration (Unified GPU Pipeline)
  * 
- * Unified API: process_frame() matches Python backend exactly.
+ * Uses the same C++ engine as the backend:
+ * - WebGPU rendering in browser
+ * - SPIR-V shaders compiled to WGSL
+ * - SDF text rendering for crisp text at any resolution
+ * 
+ * API matches Python's caption_engine_unified module.
  */
 
-let cppCaptionEngine = null;
-let cppEngineReady = false;
+let wasmModule = null;
+let renderPipeline = null;
+let engineReady = false;
+let initPromise = null;
+
+// WASM module paths
+const WASM_PATHS = [
+    '/extensions/caption-live/wasm/caption_engine_unified.js',
+    '/extensions/caption-live/lib/caption_engine_unified.js',
+    './wasm/caption_engine_unified.js'
+];
 
 /**
- * Load the C++ Caption Engine WASM module
+ * Initialize the Unified GPU Render Pipeline (WASM)
  */
-export async function loadCppCaptionEngine() {
-    if (cppCaptionEngine) {
-        return cppCaptionEngine;
-    }
+export async function initUnifiedPipeline() {
+    if (renderPipeline) return renderPipeline;
+    if (initPromise) return initPromise;
 
-    try {
-        // Try to load the C++ WASM module
-        const module = await import('./wasm/caption_engine_wasm.js');
-        cppCaptionEngine = await module.default({
-            locateFile: (path, prefix) => {
-                if (path.endsWith('.data') || path.endsWith('.wasm')) {
-                    return '/extensions/caption-live/wasm/' + path;
+    initPromise = (async () => {
+        console.log('🚀 Loading Unified GPU Pipeline (WASM)...');
+
+        // Try each possible path
+        for (const path of WASM_PATHS) {
+            try {
+                const module = await import(path);
+                wasmModule = await module.default({
+                    locateFile: (file, prefix) => {
+                        if (file.endsWith('.wasm')) {
+                            return path.replace('.js', '.wasm');
+                        }
+                        return prefix + file;
+                    }
+                });
+
+                // Get the global pipeline (same as Python's get_pipeline())
+                renderPipeline = wasmModule.get_pipeline();
+
+                // Initialize with common resolution
+                const target = new wasmModule.RenderTarget();
+                target.width = 1920;
+                target.height = 1080;
+                target.fps = 60.0;
+
+                if (renderPipeline.initialize(target)) {
+                    engineReady = true;
+                    console.log('✅ Unified GPU Pipeline Ready!');
+                    console.log(`   Backend: ${renderPipeline.backend_name()}`);
+                    return renderPipeline;
                 }
-                return prefix + path;
+            } catch (e) {
+                console.log(`   Trying ${path}... not found`);
             }
-        });
-        cppEngineReady = true;
-        console.log('✅ C++ Caption Engine WASM loaded');
-        return cppCaptionEngine;
-    } catch (e) {
-        console.warn('⚠️ C++ Caption Engine WASM not available:', e);
+        }
+
+        console.warn('⚠️ Unified Pipeline WASM not available, using fallback');
         return null;
-    }
+    })();
+
+    return initPromise;
 }
 
 /**
- * Check if C++ engine is available
- */
-export function isCppEngineReady() {
-    return cppEngineReady;
-}
-
-/**
- * UNIFIED API: Process frame with input image
- * Matches Python: process_frame(json, time, input_array) -> output_array
+ * UNIFIED API: Process frame with scene template
+ * Identical to Python: process_frame(template_json, time, input_image)
  * 
- * @param {string} templateJson - JSON scene description
+ * @param {string} templateJson - Scene description JSON
  * @param {number} time - Current time in seconds
- * @param {Uint8ClampedArray} inputData - Input image data (RGBA)
- * @param {number} width - Image width
- * @param {number} height - Image height
- * @returns {ImageData|null} - Composited ImageData or null if failed
+ * @param {ImageData} inputImage - Input image to composite on
+ * @returns {ImageData|null} - Composited result
  */
-export function processFrame(templateJson, time, inputData, width, height) {
-    if (!cppCaptionEngine || !cppCaptionEngine.process_frame) {
+export async function processFrame(templateJson, time, inputImage) {
+    const pipeline = await initUnifiedPipeline();
+
+    if (!pipeline || !wasmModule) {
         return null;
     }
 
     try {
-        const result = cppCaptionEngine.process_frame(
-            templateJson,
-            time,
-            inputData,
-            width,
-            height
+        // Parse scene template
+        const scene = wasmModule.SceneTemplate.from_json(templateJson);
+
+        // Create timing info
+        const timing = new wasmModule.FrameTiming();
+        timing.current_time = time;
+        timing.duration = scene.duration || 5.0;
+        timing.delta_time = 1.0 / 60.0;
+
+        // Call unified render (composites input + captions)
+        const output = pipeline.render_frame_composite(
+            scene,
+            timing,
+            inputImage.data,
+            inputImage.width,
+            inputImage.height
         );
 
-        const pixels = new Uint8ClampedArray(result.data);
-        return new ImageData(pixels, result.width, result.height);
+        // Convert to ImageData
+        const pixels = output.to_numpy();
+        return new ImageData(
+            new Uint8ClampedArray(pixels),
+            output.width,
+            output.height
+        );
     } catch (e) {
-        console.error('process_frame error:', e);
+        console.error('processFrame error:', e);
         return null;
     }
 }
 
 /**
- * Legacy: Render frame without input (caption only on transparent)
+ * Render frame without input (transparent background)
  */
-export function renderFrameCpp(templateJson, time) {
-    if (!cppCaptionEngine) {
+export async function renderFrame(templateJson, time, width, height) {
+    const pipeline = await initUnifiedPipeline();
+
+    if (!pipeline || !wasmModule) {
         return null;
     }
 
     try {
-        const result = cppCaptionEngine.render_frame_rgba(templateJson, time);
-        const pixels = new Uint8ClampedArray(result.data);
-        return new ImageData(pixels, result.width, result.height);
+        const scene = wasmModule.SceneTemplate.from_json(templateJson);
+
+        // Re-initialize if size changed
+        if (scene.target.width !== width || scene.target.height !== height) {
+            scene.target.width = width;
+            scene.target.height = height;
+            const target = new wasmModule.RenderTarget();
+            target.width = width;
+            target.height = height;
+            pipeline.initialize(target);
+        }
+
+        const timing = new wasmModule.FrameTiming();
+        timing.current_time = time;
+        timing.duration = scene.duration || 5.0;
+
+        const output = pipeline.render_frame(scene, timing);
+
+        return new ImageData(
+            new Uint8ClampedArray(output.to_numpy()),
+            output.width,
+            output.height
+        );
     } catch (e) {
-        console.error('C++ render error:', e);
+        console.error('renderFrame error:', e);
         return null;
     }
 }
 
 /**
- * UNIFIED: Render with C++ engine (process_frame API)
- * @param {HTMLCanvasElement} canvas
- * @param {CanvasRenderingContext2D} ctx
- * @param {string} templateJson
- * @param {number} time
- * @param {ImageData} inputImageData - Optional input image to composite on
+ * Render to canvas (convenience function)
  */
-export async function renderWithCppEngine(canvas, ctx, templateJson, time, inputImageData = null) {
-    await loadCppCaptionEngine();
+export async function renderToCanvas(canvas, ctx, templateJson, time, inputImageData = null) {
+    await initUnifiedPipeline();
 
-    if (!cppEngineReady) {
+    if (!engineReady) {
         return false;
     }
 
     try {
         let imageData;
 
-        if (inputImageData && cppCaptionEngine.process_frame) {
-            // Use unified process_frame API (same as Python backend)
-            imageData = processFrame(
-                templateJson,
-                time,
-                inputImageData.data,
-                inputImageData.width,
-                inputImageData.height
-            );
-        } else if (cppCaptionEngine.render_frame_rgba) {
-            // Fallback: render caption only (for preview without input)
-            imageData = renderFrameCpp(templateJson, time);
+        if (inputImageData) {
+            imageData = await processFrame(templateJson, time, inputImageData);
+        } else {
+            imageData = await renderFrame(templateJson, time, canvas.width, canvas.height);
         }
 
         if (imageData) {
-            // Handle dimension changes
             if (canvas.width !== imageData.width || canvas.height !== imageData.height) {
                 canvas.width = imageData.width;
                 canvas.height = imageData.height;
@@ -135,32 +187,49 @@ export async function renderWithCppEngine(canvas, ctx, templateJson, time, input
             return true;
         }
     } catch (e) {
-        console.error('renderWithCppEngine error:', e);
+        console.error('renderToCanvas error:', e);
     }
 
     return false;
 }
 
 /**
- * Test GPU Compute
+ * Check if pipeline is ready
  */
-export function testCompute() {
-    if (!cppCaptionEngine) return false;
-    try {
-        const result = cppCaptionEngine.test_compute();
-        console.log("GPU Test:", result ? "PASS" : "FAIL");
-        return result;
-    } catch (e) {
-        console.error("GPU Test Error:", e);
-        return false;
-    }
+export function isReady() {
+    return engineReady;
 }
 
+/**
+ * Get backend info
+ */
+export async function getBackendInfo() {
+    const pipeline = await initUnifiedPipeline();
+    if (!pipeline) {
+        return { name: 'None', type: 'fallback', hasCUDA: false };
+    }
+
+    return {
+        name: pipeline.backend_name(),
+        type: wasmModule.BackendType[pipeline.active_backend()],
+        hasCUDA: pipeline.has_cuda()
+    };
+}
+
+// Legacy exports for backward compatibility
+export const loadCppCaptionEngine = initUnifiedPipeline;
+export const isCppEngineReady = isReady;
+export const renderWithCppEngine = renderToCanvas;
+
 export default {
+    initUnifiedPipeline,
+    processFrame,
+    renderFrame,
+    renderToCanvas,
+    isReady,
+    getBackendInfo,
+    // Legacy
     loadCppCaptionEngine,
     isCppEngineReady,
-    processFrame,
-    renderFrameCpp,
-    renderWithCppEngine,
-    testCompute
+    renderWithCppEngine
 };
