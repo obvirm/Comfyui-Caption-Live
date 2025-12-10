@@ -26,13 +26,26 @@ static bool init_font() {
   if (g_font_initialized)
     return true;
 
-  // Try to load Inter font from common locations
+  // Try to load font from various locations
+  // ComfyUI runs from ComfyUI root, so paths are relative to that
   std::vector<std::string> font_paths = {
+      // Direct paths (when running from caption-live directory)
+      "core/assets/Roboto-Bold.ttf",
       "assets/Roboto-Bold.ttf",
-      "assets/Inter-Black.ttf",
-      "/assets/Roboto-Bold.ttf",
-      "custom_nodes/caption-live/caption_engine_cpp/assets/Roboto-Bold.ttf",
+      // From ComfyUI root (most common case)
+      "custom_nodes/caption-live/core/assets/Roboto-Bold.ttf",
       "custom_nodes/caption-live/assets/Roboto-Bold.ttf",
+      // Legacy paths
+      "custom_nodes/caption-live/caption_engine_cpp/assets/Roboto-Bold.ttf",
+      // Absolute paths (fallback)
+      "E:/Ai/ComfyUI/ComfyUI/custom_nodes/caption-live/core/assets/"
+      "Roboto-Bold.ttf",
+      // Alternative fonts
+      "core/assets/Inter-Black.ttf",
+      "custom_nodes/caption-live/core/assets/Inter-Black.ttf",
+      // System fonts (Windows)
+      "C:/Windows/Fonts/arial.ttf",
+      "C:/Windows/Fonts/segoeui.ttf",
   };
 
   for (const auto &path : font_paths) {
