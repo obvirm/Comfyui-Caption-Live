@@ -1,0 +1,14 @@
+MSBuild version 17.14.23+b0019275e for .NET Framework
+
+  frame_validator.cpp
+  unified_backend.cpp
+  Generating Code...
+template.obj : warning LNK4006: "public: static struct CaptionEngine::Template __cdecl CaptionEngine::Template::from_json(class std::basic_string<char,struct std::char_traits<char>,class std::allocator<char> > const &)" (?from_json@Template@CaptionEngine@@SA?AU12@AEBV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@@Z) already defined in template_parser.obj; second definition ignored [E:\Ai\ComfyUI\ComfyUI\custom_nodes\caption-live\core\build_py12\caption_engine.vcxproj]
+template.obj : warning LNK4006: "public: class std::basic_string<char,struct std::char_traits<char>,class std::allocator<char> > __cdecl CaptionEngine::Template::to_json(void)const " (?to_json@Template@CaptionEngine@@QEBA?AV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@XZ) already defined in template_parser.obj; second definition ignored [E:\Ai\ComfyUI\ComfyUI\custom_nodes\caption-live\core\build_py12\caption_engine.vcxproj]
+  caption_engine.vcxproj -> E:\Ai\ComfyUI\ComfyUI\custom_nodes\caption-live\core\build_py12\lib\Release\caption_engine.lib
+  Building Custom Rule E:/Ai/ComfyUI/ComfyUI/custom_nodes/caption-live/core/CMakeLists.txt
+     Creating library E:/Ai/ComfyUI/ComfyUI/custom_nodes/caption-live/core/build_py12/lib/Release/caption_engine_py.lib and object E:/Ai/ComfyUI/ComfyUI/custom_nodes/caption-live/core/build_py12/lib/Release/caption_engine_py.exp
+  Generating code
+  Finished generating code
+  caption_engine_py.vcxproj -> E:\Ai\ComfyUI\ComfyUI\custom_nodes\caption-live\core\build_py12\lib\Release\caption_engine_py.cp312-win_amd64.pyd
+  Building Custom Rule E:/Ai/ComfyUI/ComfyUI/custom_nodes/caption-live/core/CMakeLists.txt

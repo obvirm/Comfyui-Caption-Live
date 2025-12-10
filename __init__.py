@@ -1,34 +1,27 @@
+"""
+Caption Live - ComfyUI Custom Node
+C++ powered caption effects.
+"""
 import os
 import sys
-import traceback
 
-log_file = os.path.join(os.path.dirname(__file__), "init_error.log")
+# Add current directory for engine import
+current_dir = os.path.dirname(__file__)
+if current_dir not in sys.path:
+    sys.path.insert(0, current_dir)
 
-def log_init(msg):
-    with open(log_file, "a", encoding="utf-8") as f:
-        f.write(msg + "\n")
+from .caption_live import CaptionLiveNode
 
-try:
-    from .caption_live import CaptionLiveNode
-    
-    NODE_CLASS_MAPPINGS = {
-        "CaptionLiveNode": CaptionLiveNode
-    }
+NODE_CLASS_MAPPINGS = {
+    "CaptionLiveNode": CaptionLiveNode,
+}
 
-    NODE_DISPLAY_NAME_MAPPINGS = {
-        "CaptionLiveNode": "Caption Live"
-    }
+NODE_DISPLAY_NAME_MAPPINGS = {
+    "CaptionLiveNode": "Caption Live",
+}
 
-    WEB_DIRECTORY = "js"
+WEB_DIRECTORY = "web"
 
-    __all__ = ["NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS", "WEB_DIRECTORY"]
-    
-    # Log success (optional, but good for confirmation)
-    # log_init("Successfully loaded CaptionLiveNode")
+__all__ = ["NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS", "WEB_DIRECTORY"]
 
-except Exception as e:
-    log_init(f"FAILED to load CaptionLiveNode: {e}")
-    log_init(traceback.format_exc())
-    
-    # Re-raise so ComfyUI knows it failed, but we have the log now
-    raise e
+print("✅ Caption Live Loaded!")

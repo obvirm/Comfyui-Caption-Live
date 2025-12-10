@@ -1,0 +1,12 @@
+MSBuild version 17.14.23+b0019275e for .NET Framework
+
+  1>Checking Build System
+  Building Custom Rule E:/Ai/ComfyUI/ComfyUI/custom_nodes/caption-live/caption_engine_cpp/CMakeLists.txt
+  engine.cpp
+  template.cpp
+  renderer.cpp
+  text_renderer.cpp
+  cpu_backend.cpp
+  Generating Code...
+  caption_engine.vcxproj -> E:\Ai\ComfyUI\ComfyUI\custom_nodes\caption-live\caption_engine_cpp\build\lib\Release\caption_engine.lib
+  Building Custom Rule E:/Ai/ComfyUI/ComfyUI/custom_nodes/caption-live/caption_engine_cpp/CMakeLists.txt

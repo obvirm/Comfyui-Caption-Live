@@ -1,0 +1,63 @@
+[build-system]
+requires = ["setuptools>=64", "wheel", "pybind11>=2.11"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "caption-engine"
+version = "1.0.0"
+description = "Caption Engine - High-performance rendering engine for caption effects"
+readme = "README.md"
+license = {text = "MIT"}
+authors = [
+    {name = "Caption Live Team"}
+]
+keywords = ["caption", "video", "effects", "rendering", "comfyui"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: C++",
+    "Topic :: Multimedia :: Video",
+]
+requires-python = ">=3.9"
+dependencies = [
+    "numpy>=1.20",
+    "pillow>=9.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-cov",
+    "black",
+    "ruff",
+]
+cuda = [
+    "torch>=2.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/your-org/caption-live"
+Repository = "https://github.com/your-org/caption-live.git"
+Issues = "https://github.com/your-org/caption-live/issues"
+
+[tool.setuptools]
+packages = ["caption_engine"]
+package-dir = {"caption_engine" = "lib/caption_engine"}
+
+[tool.setuptools.package-data]
+caption_engine = ["*.pyd", "*.so", "*.dylib", "*.dll"]
+
+[tool.black]
+line-length = 88
+target-version = ['py39', 'py310', 'py311', 'py312']
+
+[tool.ruff]
+line-length = 88
+select = ["E", "F", "I", "N", "W"]
+ignore = ["E501"]

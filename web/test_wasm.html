@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Caption Engine WASM Test</title>
+    <style>
+        body {
+            font-family: system-ui, -apple-system, sans-serif;
+            background: #1a1a2e;
+            color: #fff;
+            padding: 20px;
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        h1 {
+            color: #00d9ff;
+        }
+
+        .preview-container {
+            background: #2a2a4a;
+            border-radius: 12px;
+            padding: 20px;
+            margin: 20px 0;
+        }
+
+        canvas {
+            border: 2px solid #00d9ff;
+            border-radius: 8px;
+            display: block;
+            margin: 10px 0;
+        }
+
+        pre {
+            background: #0d0d1a;
+            padding: 15px;
+            border-radius: 8px;
+            overflow-x: auto;
+            font-size: 12px;
+        }
+
+        .status {
+            padding: 10px;
+            border-radius: 6px;
+            margin: 10px 0;
+        }
+
+        .status.success {
+            background: #1a4d3a;
+        }
+
+        .status.error {
+            background: #4d1a1a;
+        }
+
+        .status.loading {
+            background: #4d4d1a;
+        }
+
+        button {
+            background: #00d9ff;
+            color: #000;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 16px;
+            margin: 5px;
+        }
+
+        button:hover {
+            background: #00b8d4;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>🎬 Caption Engine WASM Test</h1>
+
+    <div class="preview-container">
+        <h2>Template Preview</h2>
+        <div id="status" class="status loading">Loading WASM...</div>
+        <canvas id="preview" width="800" height="200"></canvas>
+        <button onclick="renderFrame(0)">Render t=0s</button>
+        <button onclick="renderFrame(0.5)">Render t=0.5s</button>
+        <button onclick="renderFrame(1.0)">Render t=1.0s</button>
+        <button onclick="startAnimation()">▶ Animate</button>
+        <button onclick="stopAnimation()">⏹ Stop</button>
+    </div>
+
+    <div class="preview-container">
+        <h2>Template JSON</h2>
+        <pre id="template-json"></pre>
+    </div>
+
+    <script type="module">
+        import init, { render_frame_rgba, WasmComputeManager } from './lib/caption_engine_wasm/caption_engine.js';
+
+        async function run() {
+            await init();
+            
+            const canvas = document.getElementById('canvas');
+            const ctx = canvas.getContext('2d');
+            
+            // GPU Test
+            try {
+                const gpu = await WasmComputeManager.new();
+                console.log("GPU Manager created");
+                
+                const testEffect = `
+effect: "test"
+parameters:
+  val: float
+kernel:
+  type: "compute"
+  workgroup_size: [16, 16, 1]
+  precision: "fp32"
+  code: |
+    out_color = vec4<f32>(uv.x, uv.y, 0.0, 1.0);
+`;
+                gpu.load_effect(testEffect);
+                
+                const width = canvas.width;
+                const height = canvas.height;
+                const input = new Float32Array(width * height * 4); // Black
+                const params = new Float32Array([0.0]);
+                
+                const result = await gpu.execute_effect(input, params, width, height);
+                
+                // Draw
+                const uint8 = new Uint8ClampedArray(width * height * 4);
+                for(let i=0; i<result.length; i++) uint8[i] = result[i] * 255;
+                
+                const imgData = new ImageData(uint8, width, height);
+                ctx.putImageData(imgData, 0, 0);
+                
+            } catch(e) {
+                console.error("GPU Error:", e);
+            }
+        }
+
+        run();
+    </script>
+</body>
+
+</html>

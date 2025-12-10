@@ -1,0 +1,76 @@
+Change Dir: 'E:/Ai/ComfyUI/ComfyUI/custom_nodes/caption-live/caption_engine_cpp/build'
+
+Run Build Command(s): "C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/MSBuild/Current/Bin/amd64/MSBuild.exe" caption_engine_py.vcxproj /p:Configuration=Release /p:Platform=x64 /p:VisualStudioVersion=17.0 /v:n
+MSBuild version 17.14.23+b0019275e for .NET Framework
+Build started 09/12/2025 20.36.24.
+
+Project "E:\Ai\ComfyUI\ComfyUI\custom_nodes\caption-live\caption_engine_cpp\build\caption_engine_py.vcxproj" on node 1 (default targets).
+Project "E:\Ai\ComfyUI\ComfyUI\custom_nodes\caption-live\caption_engine_cpp\build\caption_engine_py.vcxproj" (1) is building "E:\Ai\ComfyUI\ComfyUI\custom_nodes\caption-live\caption_engine_cpp\build\ZERO_CHECK.vcxproj" (2) on node 1 (default targets).
+PrepareForBuild:
+  Structured output is enabled. The formatting of compiler diagnostics will reflect the error hierarchy. See https://aka.ms/cpp/structured-output for more details.
+InitializeBuildStatus:
+  Creating "x64\Release\ZERO_CHECK\ZERO_CHECK.tlog\unsuccessfulbuild" because "AlwaysCreate" was specified.
+  Touching "x64\Release\ZERO_CHECK\ZERO_CHECK.tlog\unsuccessfulbuild".
+CustomBuild:
+  All outputs are up-to-date.
+FinalizeBuildStatus:
+  Deleting file "x64\Release\ZERO_CHECK\ZERO_CHECK.tlog\unsuccessfulbuild".
+  Touching "x64\Release\ZERO_CHECK\ZERO_CHECK.tlog\ZERO_CHECK.lastbuildstate".
+Done Building Project "E:\Ai\ComfyUI\ComfyUI\custom_nodes\caption-live\caption_engine_cpp\build\ZERO_CHECK.vcxproj" (default targets).
+Project "E:\Ai\ComfyUI\ComfyUI\custom_nodes\caption-live\caption_engine_cpp\build\caption_engine_py.vcxproj" (1) is building "E:\Ai\ComfyUI\ComfyUI\custom_nodes\caption-live\caption_engine_cpp\build\caption_engine.vcxproj" (3) on node 1 (default targets).
+PrepareForBuild:
+  Structured output is enabled. The formatting of compiler diagnostics will reflect the error hierarchy. See https://aka.ms/cpp/structured-output for more details.
+InitializeBuildStatus:
+  Creating "caption_engine.dir\Release\caption_engine.tlog\unsuccessfulbuild" because "AlwaysCreate" was specified.
+  Touching "caption_engine.dir\Release\caption_engine.tlog\unsuccessfulbuild".
+CustomBuild:
+  All outputs are up-to-date.
+ClCompile:
+  All outputs are up-to-date.
+Lib:
+  C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\bin\HostX64\x64\Lib.exe /OUT:"E:\Ai\ComfyUI\ComfyUI\custom_nodes\caption-live\caption_engine_cpp\build\lib\Release\caption_engine.lib" /NOLOGO /MACHINE:X64  /machine:x64 caption_engine.dir\Release\engine.obj
+  caption_engine.dir\Release\template.obj
+  caption_engine.dir\Release\renderer.obj
+  caption_engine.dir\Release\text_renderer.obj
+  caption_engine.dir\Release\cpu_backend.obj
+  caption_engine.vcxproj -> E:\Ai\ComfyUI\ComfyUI\custom_nodes\caption-live\caption_engine_cpp\build\lib\Release\caption_engine.lib
+FinalizeBuildStatus:
+  Deleting file "caption_engine.dir\Release\caption_engine.tlog\unsuccessfulbuild".
+  Touching "caption_engine.dir\Release\caption_engine.tlog\caption_engine.lastbuildstate".
+Done Building Project "E:\Ai\ComfyUI\ComfyUI\custom_nodes\caption-live\caption_engine_cpp\build\caption_engine.vcxproj" (default targets).
+PrepareForBuild:
+  Structured output is enabled. The formatting of compiler diagnostics will reflect the error hierarchy. See https://aka.ms/cpp/structured-output for more details.
+InitializeBuildStatus:
+  Creating "caption_engine_py.dir\Release\caption_.D09CB87E.tlog\unsuccessfulbuild" because "AlwaysCreate" was specified.
+  Touching "caption_engine_py.dir\Release\caption_.D09CB87E.tlog\unsuccessfulbuild".
+CustomBuild:
+  All outputs are up-to-date.
+ClCompile:
+  All outputs are up-to-date.
+Link:
+  C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\bin\HostX64\x64\link.exe /ERRORREPORT:QUEUE /OUT:"E:\Ai\ComfyUI\ComfyUI\custom_nodes\caption-live\caption_engine_cpp\build\lib\Release\caption_engine_py.cp313-win_amd64.pyd" /INCREMENTAL:NO /NOLOGO lib\Release\caption_engine.lib C:\Users\X\scoop\apps\miniconda3\current\libs\python313.lib kernel32.lib user32.lib gdi32.lib winspool.lib shell32.lib ole32.lib oleaut32.lib uuid.lib comdlg32.lib advapi32.lib /MANIFEST /MANIFESTUAC:"level='asInvoker' uiAccess='false'" /manifest:embed /PDB:"E:/Ai/ComfyUI/ComfyUI/custom_nodes/caption-live/caption_engine_cpp/build/lib/Release/caption_engine_py.pdb" /SUBSYSTEM:CONSOLE /LTCG /LTCGOUT:"caption_engine_py.dir\Release\caption_engine_py.cp313-win_amd64.iobj" /TLBID:1 /DYNAMICBASE /NXCOMPAT /IMPLIB:"E:/Ai/ComfyUI/ComfyUI/custom_nodes/caption-live/caption_engine_cpp/build/lib/Release/caption_engine_py.lib" /MACHINE:X64  /machine:x64 /DLL caption_engine_py.dir\Release\python_bindings.obj
+  Generating code
+  Finished generating code
+  caption_engine_py.vcxproj -> E:\Ai\ComfyUI\ComfyUI\custom_nodes\caption-live\caption_engine_cpp\build\lib\Release\caption_engine_py.cp313-win_amd64.pyd
+PostBuildEvent:
+  setlocal
+  "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe" -E copy E:/Ai/ComfyUI/ComfyUI/custom_nodes/caption-live/caption_engine_cpp/build/lib/Release/caption_engine_py.cp313-win_amd64.pyd E:/Ai/ComfyUI/ComfyUI/custom_nodes/caption-live/caption_engine_cpp/../caption_engine_py.pyd
+  if %errorlevel% neq 0 goto :cmEnd
+  :cmEnd
+  endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone
+  :cmErrorLevel
+  exit /b %1
+  :cmDone
+  if %errorlevel% neq 0 goto :VCEnd
+  :VCEnd
+FinalizeBuildStatus:
+  Deleting file "caption_engine_py.dir\Release\caption_.D09CB87E.tlog\unsuccessfulbuild".
+  Touching "caption_engine_py.dir\Release\caption_.D09CB87E.tlog\caption_engine_py.lastbuildstate".
+Done Building Project "E:\Ai\ComfyUI\ComfyUI\custom_nodes\caption-live\caption_engine_cpp\build\caption_engine_py.vcxproj" (default targets).
+
+Build succeeded.
+    0 Warning(s)
+    0 Error(s)
+
+Time Elapsed 00:00:01.26
+

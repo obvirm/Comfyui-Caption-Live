@@ -4,99 +4,82 @@ import os
 import platform
 import shutil
 import urllib.request
-
-# --- CONFIGURATION ---
-GITHUB_REPO = "YOUR_USERNAME/YOUR_REPO" # TODO: Update this!
-VERSION = "0.1.0"
-# ---------------------
+import glob
 
 def check_command(command):
     return shutil.which(command) is not None
 
-def run_command(command, cwd=None):
+def run_command(command, cwd=None, env=None):
     try:
-        subprocess.check_call(command, shell=True, cwd=cwd)
+        full_env = os.environ.copy()
+        if env:
+            full_env.update(env)
+        subprocess.check_call(command, shell=True, cwd=cwd, env=full_env)
         return True
     except subprocess.CalledProcessError:
         return False
 
-def get_platform_tag():
-    system = platform.system().lower()
-    machine = platform.machine().lower()
+def copy_icu_datafile():
+    """Copy icudtl.dat to project folder. __init__.py will set ICU_DATA env var."""
+    node_dir = os.path.dirname(__file__)
+    dest_path = os.path.join(node_dir, "icudtl.dat")
     
-    if system == "windows":
-        return "win_amd64"
-    elif system == "linux":
-        return "manylinux_2_17_x86_64.manylinux2014_x86_64" # Standard for maturin
-    elif system == "darwin":
-        if machine == "arm64":
-            return "macosx_11_0_arm64"
-        else:
-            return "macosx_10_7_x86_64"
-    return None
-
-def get_python_tag():
-    # e.g., cp310
-    v = sys.version_info
-    return f"cp{v.major}{v.minor}"
-
-def download_wheel(repo, version, py_tag, platform_tag):
-    # rust_caption-0.1.0-cp310-cp310-win_amd64.whl
-    filename = f"rust_caption-{version}-{py_tag}-{py_tag}-{platform_tag}.whl"
-    url = f"https://github.com/{repo}/releases/download/v{version}/{filename}"
+    # Already exists
+    if os.path.exists(dest_path):
+        print(f"✅ ICU datafile exists: {dest_path}")
+        return True
     
-    print(f"🔍 Looking for wheel: {url}")
+    # Find from build output
+    for src in glob.glob(os.path.join(node_dir, "target", "release", "build", "skia-bindings-*", "out", "skia", "icudtl.dat")):
+        if os.path.exists(src):
+            try:
+                shutil.copy2(src, dest_path)
+                print(f"✅ Copied ICU datafile to: {dest_path}")
+                return True
+            except Exception as e:
+                print(f"⚠️ Failed: {e}")
     
-    try:
-        urllib.request.urlretrieve(url, filename)
-        return filename
-    except Exception as e:
-        print(f"⚠️ Wheel not found or download failed: {e}")
-        return None
+    print("⚠️ ICU datafile not found - text rendering may have issues")
+    return False
 
 def main():
-    print("### Caption Live (Rust) Installer ###")
+    print("### Caption Live (Rust) Installer - THE HARD WAY ###")
     
-    rust_dir = os.path.join(os.path.dirname(__file__), "rust_caption_src")
+    rust_dir = os.path.join(os.path.dirname(__file__), "backend_bridge")
     
-    # 1. Try Download Wheel
-    platform_tag = get_platform_tag()
-    py_tag = get_python_tag()
+    # ENFORCE BUILD FROM SOURCE
+    build_env = {
+        "SKIA_BUILD_FROM_SOURCE": "1",
+        "SKIA_NINJA_COMMAND": "ninja"
+    }
     
-    wheel_file = None
-    if platform_tag and "YOUR_USERNAME" not in GITHUB_REPO:
-        print("☁️ Attempting to download pre-compiled binary...")
-        wheel_file = download_wheel(GITHUB_REPO, VERSION, py_tag, platform_tag)
-        
-    if wheel_file:
-        print(f"📦 Installing {wheel_file}...")
-        if run_command(f"{sys.executable} -m pip install {wheel_file}"):
-            print("\n🎉 Success! Installed from binary.")
-            os.remove(wheel_file)
-            return
+    print("⚠️  FORCE BUILD FROM SOURCE ACTIVE")
+    print("⏳ Expect 30-60 minutes build time. Requires LLVM & Visual Studio.")
 
-    # 2. Fallback to Compilation
-    print("\n🔨 Compiling from source (Fallback)...")
-    
     if not check_command("cargo"):
         print("❌ Error: Rust (cargo) is not installed.")
-        print("   Please install Rust: https://rustup.rs/")
         sys.exit(1)
 
-    # Check for maturin
     try:
         import maturin
     except ImportError:
         print("📦 Installing maturin...")
-        run_command(f"{sys.executable} -m pip install maturin")
+        subprocess.check_call(f"{sys.executable} -m pip install maturin", shell=True)
 
     print("🚀 Building with maturin...")
+    # Gunakan release build
     cmd = "maturin develop --release"
-    if run_command(cmd, cwd=rust_dir):
+    if run_command(cmd, cwd=rust_dir, env=build_env):
         print("\n🎉 Success! Compiled and installed locally.")
+        
+        # Copy ICU datafile for text rendering
+        print("\n📋 Setting up ICU datafile...")
+        copy_icu_datafile()
     else:
         print("\n❌ Compilation failed.")
+        print("💡 Check your LLVM/Clang and Visual Studio installation.")
         sys.exit(1)
 
 if __name__ == "__main__":
     main()
+

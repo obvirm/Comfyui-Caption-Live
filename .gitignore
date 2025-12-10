@@ -1,7 +1,55 @@
+# Build artifacts
 target/
+build/
+build_*/
+*.obj
+*.o
+*.a
+*.lib
+*.dll
+*.pdb
+*.exp
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+cmake-build-*/
+*.vcxproj
+*.vcxproj.filters
+*.sln
+
+# Python
 __pycache__/
 *.pyc
+*.pyo
+*.egg-info/
+dist/
+*.egg
+
+# IDE
 .vscode/
 .idea/
-node_modules/
+*.code-workspace
+
+# macOS
 .DS_Store
+
+# Node
+node_modules/
+
+# Old dependencies
+depot_tools/
+rust-skia/
+skia/
+
+# Logs
+*.log
+init_error.log
+
+# Compiled binaries (keep .pyd in root for distribution)
+core/build/
+core/*.pyd
+lib/**/*.pyd
+
+# Local agent files
+.agent/
