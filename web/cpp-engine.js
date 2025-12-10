@@ -1,8 +1,7 @@
 /**
  * C++ Caption Engine WASM Integration
  * 
- * This module will replace the Rust WASM module when C++ WASM is ready.
- * For now, it's a stub that can be tested when the WASM build completes.
+ * Unified API: process_frame() matches Python backend exactly.
  */
 
 let cppCaptionEngine = null;
@@ -18,14 +17,10 @@ export async function loadCppCaptionEngine() {
 
     try {
         // Try to load the C++ WASM module
-        // Assumes /extensions/caption-live/wasm/caption_engine_wasm.js
         const module = await import('./wasm/caption_engine_wasm.js');
         cppCaptionEngine = await module.default({
             locateFile: (path, prefix) => {
-                if (path.endsWith('.data')) {
-                    return '/extensions/caption-live/wasm/' + path;
-                }
-                if (path.endsWith('.wasm')) {
+                if (path.endsWith('.data') || path.endsWith('.wasm')) {
                     return '/extensions/caption-live/wasm/' + path;
                 }
                 return prefix + path;
@@ -48,10 +43,40 @@ export function isCppEngineReady() {
 }
 
 /**
- * Render a frame using the C++ engine
- * @param {string} templateJson - JSON template string
+ * UNIFIED API: Process frame with input image
+ * Matches Python: process_frame(json, time, input_array) -> output_array
+ * 
+ * @param {string} templateJson - JSON scene description
  * @param {number} time - Current time in seconds
- * @returns {ImageData|null} - ImageData or null if engine not ready
+ * @param {Uint8ClampedArray} inputData - Input image data (RGBA)
+ * @param {number} width - Image width
+ * @param {number} height - Image height
+ * @returns {ImageData|null} - Composited ImageData or null if failed
+ */
+export function processFrame(templateJson, time, inputData, width, height) {
+    if (!cppCaptionEngine || !cppCaptionEngine.process_frame) {
+        return null;
+    }
+
+    try {
+        const result = cppCaptionEngine.process_frame(
+            templateJson,
+            time,
+            inputData,
+            width,
+            height
+        );
+
+        const pixels = new Uint8ClampedArray(result.data);
+        return new ImageData(pixels, result.width, result.height);
+    } catch (e) {
+        console.error('process_frame error:', e);
+        return null;
+    }
+}
+
+/**
+ * Legacy: Render frame without input (caption only on transparent)
  */
 export function renderFrameCpp(templateJson, time) {
     if (!cppCaptionEngine) {
@@ -60,8 +85,6 @@ export function renderFrameCpp(templateJson, time) {
 
     try {
         const result = cppCaptionEngine.render_frame_rgba(templateJson, time);
-
-        // Create ImageData from raw pixels
         const pixels = new Uint8ClampedArray(result.data);
         return new ImageData(pixels, result.width, result.height);
     } catch (e) {
@@ -71,36 +94,61 @@ export function renderFrameCpp(templateJson, time) {
 }
 
 /**
- * Integration with existing renderer.js
- * Call this from startRenderLoop to try C++ engine first
+ * UNIFIED: Render with C++ engine (process_frame API)
+ * @param {HTMLCanvasElement} canvas
+ * @param {CanvasRenderingContext2D} ctx
+ * @param {string} templateJson
+ * @param {number} time
+ * @param {ImageData} inputImageData - Optional input image to composite on
  */
-export async function renderWithCppEngine(canvas, ctx, templateJson, time) {
+export async function renderWithCppEngine(canvas, ctx, templateJson, time, inputImageData = null) {
     await loadCppCaptionEngine();
 
     if (!cppEngineReady) {
-        return false; // Fallback to existing Rust/JS renderer
+        return false;
     }
 
-    const imageData = renderFrameCpp(templateJson, time);
-    if (imageData) {
-        canvas.width = imageData.width;
-        canvas.height = imageData.height;
-        ctx.putImageData(imageData, 0, 0);
-        return true;
+    try {
+        let imageData;
+
+        if (inputImageData && cppCaptionEngine.process_frame) {
+            // Use unified process_frame API (same as Python backend)
+            imageData = processFrame(
+                templateJson,
+                time,
+                inputImageData.data,
+                inputImageData.width,
+                inputImageData.height
+            );
+        } else if (cppCaptionEngine.render_frame_rgba) {
+            // Fallback: render caption only (for preview without input)
+            imageData = renderFrameCpp(templateJson, time);
+        }
+
+        if (imageData) {
+            // Handle dimension changes
+            if (canvas.width !== imageData.width || canvas.height !== imageData.height) {
+                canvas.width = imageData.width;
+                canvas.height = imageData.height;
+            }
+            ctx.putImageData(imageData, 0, 0);
+            return true;
+        }
+    } catch (e) {
+        console.error('renderWithCppEngine error:', e);
     }
 
     return false;
 }
 
 /**
- * Test WebGPU Compute Shader
+ * Test GPU Compute
  */
 export function testCompute() {
     if (!cppCaptionEngine) return false;
     try {
-        console.log("🧪 Triggering C++ Engine GPU Test...");
         const result = cppCaptionEngine.test_compute();
-        console.log("C++ GPU Test Result:", result ? "PASS" : "FAIL");
+        console.log("GPU Test:", result ? "PASS" : "FAIL");
         return result;
     } catch (e) {
         console.error("GPU Test Error:", e);
@@ -111,6 +159,7 @@ export function testCompute() {
 export default {
     loadCppCaptionEngine,
     isCppEngineReady,
+    processFrame,
     renderFrameCpp,
     renderWithCppEngine,
     testCompute
