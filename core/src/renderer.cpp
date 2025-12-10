@@ -109,17 +109,62 @@ ImageBuffer Renderer::render_frame(const Template &tmpl, double time) {
 
 ImageBuffer Renderer::render_frame(const Template &tmpl, double time,
                                    const ImageBuffer &input) {
-  ImageBuffer img = input;
+  // First render caption overlay to transparent buffer
+  ImageBuffer overlay =
+      ImageBuffer::create(tmpl.canvas.width, tmpl.canvas.height);
+  overlay.clear(); // Transparent
 
   for (const auto &layer : tmpl.layers) {
     if (auto *text = std::get_if<TextLayer>(&layer)) {
-      render_text_layer(img, *text, time);
+      render_text_layer(overlay, *text, time);
     } else if (auto *image = std::get_if<ImageLayer>(&layer)) {
-      render_image_layer(img, *image, time);
+      render_image_layer(overlay, *image, time);
     }
   }
 
-  return img;
+  // Alpha composite overlay onto input image
+  ImageBuffer result = input; // Copy input as base
+
+  // Ensure result dimensions match
+  if (result.width != overlay.width || result.height != overlay.height) {
+    result = overlay; // If dimensions mismatch, just use overlay
+  } else {
+    // Alpha composite: result = overlay * alpha + input * (1 - alpha)
+    for (size_t i = 0; i < overlay.data.size(); i += 4) {
+      float overlay_r = overlay.data[i + 0] / 255.0f;
+      float overlay_g = overlay.data[i + 1] / 255.0f;
+      float overlay_b = overlay.data[i + 2] / 255.0f;
+      float overlay_a = overlay.data[i + 3] / 255.0f;
+
+      float input_r = result.data[i + 0] / 255.0f;
+      float input_g = result.data[i + 1] / 255.0f;
+      float input_b = result.data[i + 2] / 255.0f;
+      float input_a = result.data[i + 3] / 255.0f;
+
+      // Standard "over" compositing operator
+      float out_a = overlay_a + input_a * (1.0f - overlay_a);
+      float out_r =
+          (overlay_r * overlay_a + input_r * input_a * (1.0f - overlay_a)) /
+          std::max(out_a, 0.001f);
+      float out_g =
+          (overlay_g * overlay_a + input_g * input_a * (1.0f - overlay_a)) /
+          std::max(out_a, 0.001f);
+      float out_b =
+          (overlay_b * overlay_a + input_b * input_a * (1.0f - overlay_a)) /
+          std::max(out_a, 0.001f);
+
+      result.data[i + 0] =
+          static_cast<uint8_t>(std::clamp(out_r * 255.0f, 0.0f, 255.0f));
+      result.data[i + 1] =
+          static_cast<uint8_t>(std::clamp(out_g * 255.0f, 0.0f, 255.0f));
+      result.data[i + 2] =
+          static_cast<uint8_t>(std::clamp(out_b * 255.0f, 0.0f, 255.0f));
+      result.data[i + 3] =
+          static_cast<uint8_t>(std::clamp(out_a * 255.0f, 0.0f, 255.0f));
+    }
+  }
+
+  return result;
 }
 
 void Renderer::render_text_layer(ImageBuffer &img, const TextLayer &layer,
