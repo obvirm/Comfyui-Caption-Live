@@ -4,11 +4,12 @@
  */
 
 #include "engine/engine.hpp"
-#include "compute/compiler.hpp"
+#include "compute/unified_backend.hpp"
 #include "core/deterministic.hpp"
 #include "engine/renderer.hpp"
 #include "engine/template.hpp"
-#include "graphics/backend.hpp"
+#include "gpu/backend.hpp"
+#include "platform/platform.hpp"
 
 #include <stdexcept>
 
@@ -18,7 +19,7 @@ namespace CaptionEngine {
 struct Engine::Impl {
   EngineConfig config;
   std::unique_ptr<Renderer> renderer;
-  std::unique_ptr<ComputeBackend> backend;
+  std::unique_ptr<Compute::UnifiedBackend> backend;
 
   Impl(const EngineConfig &cfg) : config(cfg) {
     // Initialize renderer
@@ -27,18 +28,24 @@ struct Engine::Impl {
     // Initialize compute backend
     switch (config.backend) {
     case BackendType::Auto:
-      backend = ComputeBackend::create_best();
+      backend = Compute::UnifiedBackend::create_best();
       break;
     case BackendType::CPU:
-      backend = std::make_unique<CPUBackend>();
+      backend = std::make_unique<Compute::CPUBackend>();
       break;
-#if defined(__EMSCRIPTEN__)
+    case BackendType::CUDA:
+      // Request CUDA backend via factory (handles availability check)
+      backend = Compute::UnifiedBackend::create("cuda");
+      break;
+#if CE_PLATFORM_WASM
     case BackendType::WebGPU:
-      backend = std::make_unique<WebGPUBackend>();
+      // WebGPU backend implementation is pending (ComputeBackend mismatch)
+      // Fallback to CPU for now to allow WASM build
+      backend = std::make_unique<Compute::CPUBackend>();
       break;
 #endif
     default:
-      backend = ComputeBackend::create_best();
+      backend = Compute::UnifiedBackend::create_best();
       break;
     }
   }
@@ -104,7 +111,7 @@ std::vector<uint8_t> Engine::export_png(const FrameData &frame) {
 
 BackendType Engine::current_backend() const {
   // Map backend name to type
-  const auto name = pimpl_->backend->name();
+  const auto name = pimpl_->backend->get_info().name;
   if (name == "CPU")
     return BackendType::CPU;
   if (name == "WebGPU")
@@ -191,7 +198,7 @@ struct TestUniforms {
 };
 
 // Run isolated test if available
-bool run_rain_test_impl(ComputeBackend *backend);
+bool run_rain_test_impl(Compute::UnifiedBackend *backend);
 
 bool Engine::test_gpu_compute() {
   if (!pimpl_->backend)

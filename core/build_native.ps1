@@ -61,7 +61,7 @@ try {
     Write-Host "`n[4/4] Copying Python modules..." -ForegroundColor Yellow
     $PydFiles = Get-ChildItem -Path "." -Recurse -Filter "*.pyd"
     foreach ($pyd in $PydFiles) {
-        $dest = Join-Path ".." ".." $pyd.Name
+        $dest = Join-Path -Path (Join-Path ".." "..") -ChildPath $pyd.Name
         Copy-Item $pyd.FullName $dest -Force
         Write-Host "  -> $($pyd.Name)" -ForegroundColor DarkGray
     }

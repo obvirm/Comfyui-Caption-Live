@@ -373,4 +373,37 @@ std::vector<std::string> vulkan_device_names() {
 
 } // namespace CaptionEngine
 
+#else // !HAS_VULKAN
+
+// Stub implementations when Vulkan is not available
+#include "compute/vulkan.hpp"
+#include <stdexcept>
+
+namespace CaptionEngine {
+
+struct VulkanBackend::Impl {};
+
+VulkanBackend::VulkanBackend(const Config &) : pimpl_(nullptr) {
+  throw std::runtime_error("Vulkan backend not available - SDK not installed");
+}
+
+VulkanBackend::~VulkanBackend() = default;
+
+BufferHandle VulkanBackend::create_buffer(size_t, MemoryType) { return 0; }
+void VulkanBackend::destroy_buffer(BufferHandle) {}
+void VulkanBackend::upload_buffer(BufferHandle, std::span<const uint8_t>) {}
+std::vector<uint8_t> VulkanBackend::download_buffer(BufferHandle, size_t) {
+  return {};
+}
+void VulkanBackend::dispatch_compute(std::string_view, std::span<BufferHandle>,
+                                     WorkGroupSize) {}
+bool VulkanBackend::register_kernel(const ComputeKernel &) { return false; }
+void VulkanBackend::synchronize() {}
+
+bool vulkan_available() { return false; }
+uint32_t vulkan_version() { return 0; }
+std::vector<std::string> vulkan_device_names() { return {}; }
+
+} // namespace CaptionEngine
+
 #endif // HAS_VULKAN

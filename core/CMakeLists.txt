@@ -5,7 +5,7 @@ project(CaptionEngine
 )
 
 # Modern C++ Standard
-set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
@@ -41,6 +41,8 @@ set(CORE_SOURCES
     src/compute/compiler.cpp
     src/compute/unified_backend.cpp
     src/backends/cpu_backend.cpp
+    src/backends/gpu_stubs.cpp
+    src/text/sdf_text_renderer.cpp
 )
 
 set(EFFECTS_SOURCES
@@ -72,20 +74,43 @@ add_library(caption_engine STATIC
 )
 
 # Add unified pipeline sources if enabled
+set(UNIFIED_PIPELINE_AVAILABLE FALSE CACHE INTERNAL "Unified pipeline deps found")
+
 if(ENABLE_UNIFIED_PIPELINE)
-    target_sources(caption_engine PRIVATE ${UNIFIED_PIPELINE_SOURCES})
-    target_compile_definitions(caption_engine PUBLIC CAPTION_UNIFIED_PIPELINE=1)
-    message(STATUS "Unified Render Pipeline enabled")
+    # Check for required dependencies
+    find_package(Freetype QUIET)
+    find_package(glm QUIET)
+    
+    if(Freetype_FOUND AND glm_FOUND)
+        set(UNIFIED_PIPELINE_AVAILABLE TRUE CACHE INTERNAL "Unified pipeline deps found")
+        target_sources(caption_engine PRIVATE ${UNIFIED_PIPELINE_SOURCES})
+        target_compile_definitions(caption_engine PUBLIC 
+            CAPTION_UNIFIED_PIPELINE=1
+            CE_HAS_FREETYPE=1
+        )
+        target_link_libraries(caption_engine PRIVATE Freetype::Freetype glm::glm)
+        message(STATUS "Unified Render Pipeline enabled with FreeType + GLM")
+    else()
+        message(STATUS "Unified Render Pipeline DISABLED - missing dependencies:")
+        if(NOT Freetype_FOUND)
+            message(STATUS "  - FreeType not found")
+        endif()
+        if(NOT glm_FOUND)
+            message(STATUS "  - GLM not found")
+        endif()
+        message(STATUS "  Install with: vcpkg install freetype glm")
+    endif()
 endif()
 
 target_include_directories(caption_engine PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
+# Core libraries (always linked)
 target_link_libraries(caption_engine PRIVATE
     nlohmann_json
     stb
-    freetype
+    glm::glm
 )
 
 # Compile definitions for feature detection
@@ -165,6 +190,7 @@ if(ENABLE_CUDA AND NOT EMSCRIPTEN)
         # CUDA source files
         add_library(caption_cuda STATIC
             src/gpu/cuda_backend.cu
+            src/cuda/effect_kernels.cu
         )
         
         target_include_directories(caption_cuda PUBLIC
@@ -178,14 +204,28 @@ if(ENABLE_CUDA AND NOT EMSCRIPTEN)
             POSITION_INDEPENDENT_CODE ON
         )
         
-        target_compile_definitions(caption_cuda PUBLIC HAS_CUDA=1)
+        # Define HAS_CUDA and CAPTION_HAS_CUDA for detection
+        target_compile_definitions(caption_cuda PUBLIC 
+            HAS_CUDA=1 
+            CAPTION_HAS_CUDA=1
+        )
         target_link_libraries(caption_cuda PRIVATE CUDA::cudart)
+        
+        # Add CUDA compute adapter (C++ file that bridges to ComputeBackend)
+        target_sources(caption_engine PRIVATE
+            src/backends/cuda_compute_adapter.cpp
+        )
         
         # Link CUDA to main engine
         target_link_libraries(caption_engine PUBLIC caption_cuda)
-        target_compile_definitions(caption_engine PUBLIC HAS_CUDA=1)
+        target_compile_definitions(caption_engine PUBLIC 
+            HAS_CUDA=1
+            CAPTION_HAS_CUDA=1
+        )
         
         message(STATUS "CUDA backend enabled - Architectures: 60-90")
+        message(STATUS "  Effect kernels: glow, glitch, wave, chromatic, blur, composite")
+        message(STATUS "  New kernels: stroke, shadow, typewriter, particles")
     else()
         message(WARNING "CUDA Toolkit not found, CUDA backend disabled")
     endif()
@@ -214,6 +254,42 @@ if(ENABLE_METAL AND APPLE AND NOT EMSCRIPTEN)
         message(WARNING "Metal framework not found")
     endif()
 endif()
+
+# =============================================================================
+# DirectX 12 Backend (Windows Native)
+# =============================================================================
+option(ENABLE_DX12 "Enable DirectX 12 backend (Windows only)" OFF)
+
+if(ENABLE_DX12 AND WIN32 AND NOT EMSCRIPTEN)
+    # Check for Windows SDK
+    if(CMAKE_SYSTEM_VERSION VERSION_GREATER_EQUAL "10.0")
+        target_sources(caption_engine PRIVATE
+            src/gpu/dx12_backend.cpp
+        )
+        
+        # Link DirectX 12 libraries (included in Windows SDK)
+        target_link_libraries(caption_engine PRIVATE
+            d3d12
+            dxgi
+            dxguid
+            d3dcompiler
+        )
+        
+        # Define macros for DX12 detection
+        target_compile_definitions(caption_engine PUBLIC 
+            HAS_DX12=1
+            CAPTION_HAS_DX12=1
+        )
+        
+        message(STATUS "╔═══════════════════════════════════════════════════╗")
+        message(STATUS "║  DirectX 12 Backend ENABLED                       ║")
+        message(STATUS "║  Requires: Windows 10+ with Windows SDK 10.0+     ║")
+        message(STATUS "╚═══════════════════════════════════════════════════╝")
+    else()
+        message(WARNING "DirectX 12 requires Windows 10 or later (SDK 10.0+)")
+    endif()
+endif()
+
 
 # =============================================================================
 # Python Bindings
@@ -245,9 +321,9 @@ if(BUILD_PYTHON AND NOT EMSCRIPTEN)
             )
             
             # Unified Pipeline Python bindings (caption_engine_unified)
-            if(ENABLE_UNIFIED_PIPELINE)
+            if(UNIFIED_PIPELINE_AVAILABLE)
                 pybind11_add_module(caption_engine_unified src/bindings/unified_bindings.cpp)
-                target_link_libraries(caption_engine_unified PRIVATE caption_engine)
+                target_link_libraries(caption_engine_unified PRIVATE caption_engine glm::glm)
                 target_include_directories(caption_engine_unified PRIVATE 
                     ${CMAKE_CURRENT_SOURCE_DIR}/include
                     ${Python3_NumPy_INCLUDE_DIRS}

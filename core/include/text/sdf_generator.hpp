@@ -7,8 +7,18 @@
  */
 
 #include "gpu/backend.hpp"
+
+// Check for FreeType availability
+#if __has_include(<ft2build.h>)
+#define CE_HAS_FREETYPE 1
 #include <ft2build.h>
 #include FT_FREETYPE_H
+#else
+#define CE_HAS_FREETYPE 0
+// Stub FreeType types for compilation without SDK
+typedef void *FT_Library;
+typedef void *FT_Face;
+#endif
 
 #include <memory>
 #include <string>
@@ -34,6 +44,17 @@ struct SDFParams {
   uint32_t padding = 4;      ///< Padding between glyphs
   uint32_t atlasSize = 2048; ///< Atlas texture size
   bool useGPU = true;        ///< Use GPU for SDF generation
+};
+
+/// Glyph metrics for atlas
+struct GlyphMetrics {
+  uint32_t atlasX = 0;
+  uint32_t atlasY = 0; ///< Position in SDF atlas
+  uint32_t width = 0;
+  uint32_t height = 0; ///< Size in atlas
+  float bearingX = 0.0f;
+  float bearingY = 0.0f; ///< Offset from origin
+  float advance = 0.0f;  ///< Horizontal advance
 };
 
 /**

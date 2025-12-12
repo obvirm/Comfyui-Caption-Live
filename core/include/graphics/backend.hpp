@@ -5,12 +5,13 @@
  */
 
 #include "compute/types.hpp"
+#include "gpu/backend.hpp"
 #include <cstdint>
 #include <memory>
-#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
+
 
 namespace CaptionEngine {
 

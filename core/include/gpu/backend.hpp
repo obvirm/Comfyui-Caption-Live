@@ -8,13 +8,80 @@
  */
 
 #include <cstdint>
-#include <expected>
 #include <functional>
 #include <memory>
-#include <span>
+#include <optional>
 #include <string>
+#include <variant>
 #include <vector>
 
+// C++23 expected fallback
+#if __has_include(<expected>) && __cplusplus >= 202302L
+#include <expected>
+#define CE_HAS_STD_EXPECTED 1
+#else
+#define CE_HAS_STD_EXPECTED 0
+#endif
+
+// span may not be available in all C++20 implementations
+#if __has_include(<span>) && __cplusplus > 201703L
+#include <span>
+#else
+// Minimal span fallback
+namespace std {
+template <typename T> class span {
+public:
+  span() : data_(nullptr), size_(0) {}
+  span(T *d, size_t s) : data_(d), size_(s) {}
+
+  // Allow construction from container (mutable)
+  template <typename Container>
+  span(Container &c) : data_(c.data()), size_(size_t(c.size())) {}
+
+  // Allow construction from const container (if T is const)
+  template <typename Container>
+  span(const Container &c) : data_(c.data()), size_(size_t(c.size())) {}
+
+  T *data() const { return data_; }
+  size_t size() const { return size_; }
+
+  static constexpr size_t npos = -1;
+  span subspan(size_t offset, size_t count = npos) const {
+    if (count == npos)
+      return span(data_ + offset, size_ - offset);
+    return span(data_ + offset, count);
+  }
+
+  using iterator = T *;
+  using const_iterator = const T *;
+
+  T &operator[](size_t idx) const { return data_[idx]; }
+
+  iterator begin() const { return data_; }
+  iterator end() const { return data_ + size_; }
+  const_iterator cbegin() const { return data_; }
+  const_iterator cend() const { return data_ + size_; }
+
+private:
+  T *data_;
+  size_t size_;
+};
+} // namespace std
+#endif
+
+// Fix for libc++ rebind_pointer_t error with std::unique_ptr
+#include <memory>
+namespace std {
+template <typename T, typename D> struct pointer_traits<unique_ptr<T, D>> {
+  using pointer = unique_ptr<T, D>;
+  using element_type = T;
+  using difference_type = ptrdiff_t;
+
+  template <typename U> using rebind = unique_ptr<U>;
+
+  static pointer pointer_to(element_type &r) { return pointer(addressof(r)); }
+};
+} // namespace std
 
 namespace CaptionEngine {
 namespace GPU {
@@ -69,7 +136,81 @@ struct GPUError {
   int code = 0;
 };
 
-template <typename T> using GPUResult = std::expected<T, GPUError>;
+/// Result type for GPU operations (C++20 compatible)
+// Simplified GPUResult implementation to avoid libc++ bugs
+template <typename E> struct unexpected {
+  E err;
+  explicit unexpected(E e) : err(std::move(e)) {}
+};
+
+template <typename T> class GPUResult {
+public:
+  // Success constructor
+  GPUResult(T value) : value_(std::move(value)), has_value_(true) {}
+
+  // Error constructors
+  GPUResult(GPUError error) : error_(std::move(error)), has_value_(false) {}
+  GPUResult(unexpected<GPUError> u)
+      : error_(std::move(u.err)), has_value_(false) {}
+
+  // Move constructor
+  GPUResult(GPUResult &&other) noexcept : has_value_(other.has_value_) {
+    if (has_value_) {
+      new (&value_) T(std::move(other.value_));
+    } else {
+      new (&error_) GPUError(std::move(other.error_));
+    }
+  }
+
+  // Move assignment
+  GPUResult &operator=(GPUResult &&other) noexcept {
+    if (this != &other) {
+      destroy();
+      has_value_ = other.has_value_;
+      if (has_value_) {
+        new (&value_) T(std::move(other.value_));
+      } else {
+        new (&error_) GPUError(std::move(other.error_));
+      }
+    }
+    return *this;
+  }
+
+  // Destructor
+  ~GPUResult() { destroy(); }
+
+  // Delete copy operations (unique_ptr is not copyable)
+  GPUResult(const GPUResult &) = delete;
+  GPUResult &operator=(const GPUResult &) = delete;
+
+  bool has_value() const { return has_value_; }
+  explicit operator bool() const { return has_value_; }
+
+  T &value() { return value_; }
+  const T &value() const { return value_; }
+  T &operator*() { return value(); }
+  const T &operator*() const { return value(); }
+  T *operator->() { return &value_; }
+  const T *operator->() const { return &value_; }
+
+  GPUError &error() { return error_; }
+  const GPUError &error() const { return error_; }
+
+private:
+  void destroy() {
+    if (has_value_) {
+      value_.~T();
+    } else {
+      error_.~GPUError();
+    }
+  }
+
+  union {
+    T value_;
+    GPUError error_;
+  };
+  bool has_value_;
+};
 
 /**
  * @brief GPU Buffer handle

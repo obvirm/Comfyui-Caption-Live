@@ -1,10 +1,9 @@
 #include "compute/compiler.hpp"
+#include "compute/unified_backend.hpp"
 #include "core/deterministic.hpp"
-#include "graphics/backend.hpp"
+#include "gpu/backend.hpp"
 #include <iostream>
-#include <span>
 #include <vector>
-
 
 // Standalone test function to avoid Engine header conflicts
 namespace CaptionEngine {
@@ -64,7 +63,7 @@ struct TestUniforms {
 };
 
 // Externally exposed function
-bool run_rain_test_impl(ComputeBackend *backend) {
+bool run_rain_test_impl(CaptionEngine::Compute::UnifiedBackend *backend) {
   if (!backend)
     return false;
 
@@ -84,17 +83,22 @@ bool run_rain_test_impl(ComputeBackend *backend) {
     return false;
   }
 
-  // Register
-  if (!backend->register_kernel(*kernel_opt)) {
-    std::cerr << "❌ Kernel Registration Failed!" << std::endl;
+  // Create Kernel
+  CaptionEngine::Compute::KernelHandle kernel =
+      backend->create_kernel(kernel_opt->bytecode, kernel_opt->name);
+
+  if (kernel == CaptionEngine::Compute::InvalidKernel) {
+    std::cerr << "❌ Kernel Creation Failed!" << std::endl;
     return false;
   }
 
   // Create Buffers
-  BufferHandle uniformBuf =
-      backend->create_buffer(sizeof(TestUniforms), MemoryType::HostVisible);
-  BufferHandle storageBuf =
-      backend->create_buffer(buffer_size, MemoryType::DeviceLocal);
+  CaptionEngine::Compute::BufferHandle uniformBuf = backend->create_buffer(
+      sizeof(TestUniforms), CaptionEngine::Compute::BufferUsage::Uniform,
+      CaptionEngine::Compute::MemoryType::HostVisible);
+  CaptionEngine::Compute::BufferHandle storageBuf = backend->create_buffer(
+      buffer_size, CaptionEngine::Compute::BufferUsage::Storage,
+      CaptionEngine::Compute::MemoryType::DeviceLocal);
 
   if (!uniformBuf || !storageBuf) {
     std::cerr << "❌ Buffer Creation Failed!" << std::endl;
@@ -107,15 +111,18 @@ bool run_rain_test_impl(ComputeBackend *backend) {
 
   // Upload
   TestUniforms uniforms = {width, height, 1.0f, seed_val};
-  backend->upload_buffer(
-      uniformBuf,
-      std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(&uniforms),
-                               sizeof(uniforms)));
+  backend->upload(uniformBuf, std::span<const uint8_t>(
+                                  reinterpret_cast<const uint8_t *>(&uniforms),
+                                  sizeof(uniforms)));
 
-  // Dispatch
-  std::vector<BufferHandle> buffers = {uniformBuf, storageBuf};
+  // Bind & Dispatch
+  // Binding 0: Uniforms
+  backend->bind_buffer(kernel, 0, uniformBuf);
+  // Binding 1: Output Storage
+  backend->bind_buffer(kernel, 1, storageBuf);
+
   // 256/16 = 16 groups
-  backend->dispatch_compute("rain_test_iso", buffers, {16, 16, 1});
+  backend->dispatch(kernel, 16, 16, 1);
 
   std::cout << "✅ Rain Test Dispatched Successfully! (Seed: " << seed_val
             << ")" << std::endl;
@@ -123,6 +130,7 @@ bool run_rain_test_impl(ComputeBackend *backend) {
   // Cleanup
   backend->destroy_buffer(uniformBuf);
   backend->destroy_buffer(storageBuf);
+  backend->destroy_kernel(kernel);
 
   return true;
 }

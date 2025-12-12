@@ -8,7 +8,6 @@
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
 
-
 namespace CaptionEngine {
 namespace CUDA {
 
@@ -446,6 +445,315 @@ void launch_composite(uint32_t *output, const uint32_t *background,
 
   kernel_composite<<<grid, block, 0, stream>>>(output, background, foreground,
                                                width, height, opacity);
+}
+
+} // extern "C"
+
+// ============================================================
+// Additional Effect Kernels
+// ============================================================
+
+/**
+ * @brief Text stroke/outline kernel
+ * Creates an outline around text based on alpha channel
+ */
+__global__ void kernel_text_stroke(uint32_t *output, const uint32_t *input,
+                                   int width, int height, float stroke_width,
+                                   uint32_t stroke_color) {
+  int x = blockIdx.x * blockDim.x + threadIdx.x;
+  int y = blockIdx.y * blockDim.y + threadIdx.y;
+
+  if (x >= width || y >= height)
+    return;
+
+  int idx = y * width + x;
+  uint32_t pixel = input[idx];
+
+  float r, g, b, a;
+  unpack_rgba(pixel, r, g, b, a);
+
+  // If pixel is already fully opaque, keep it
+  if (a > 0.99f) {
+    output[idx] = pixel;
+    return;
+  }
+
+  // Check surrounding pixels for stroke
+  int radius = static_cast<int>(stroke_width);
+  float max_neighbor_alpha = 0.0f;
+
+  for (int dy = -radius; dy <= radius; ++dy) {
+    for (int dx = -radius; dx <= radius; ++dx) {
+      float dist = sqrtf(static_cast<float>(dx * dx + dy * dy));
+      if (dist > stroke_width)
+        continue;
+
+      int sx = clamp_f(static_cast<float>(x + dx), 0.0f,
+                       static_cast<float>(width - 1));
+      int sy = clamp_f(static_cast<float>(y + dy), 0.0f,
+                       static_cast<float>(height - 1));
+
+      uint32_t sample = input[sy * width + sx];
+      float sample_a = static_cast<float>((sample >> 24) & 0xFF) / 255.0f;
+
+      float weight = 1.0f - (dist / stroke_width);
+      max_neighbor_alpha = fmaxf(max_neighbor_alpha, sample_a * weight);
+    }
+  }
+
+  // Apply stroke color where there's no original content
+  if (max_neighbor_alpha > 0.01f && a < 0.5f) {
+    float sr, sg, sb, sa;
+    unpack_rgba(stroke_color, sr, sg, sb, sa);
+
+    float stroke_alpha = max_neighbor_alpha * sa;
+    output[idx] = pack_rgba(sr, sg, sb, stroke_alpha);
+  } else {
+    output[idx] = pixel;
+  }
+}
+
+/**
+ * @brief Drop shadow kernel
+ * Creates a soft drop shadow for text
+ */
+__global__ void kernel_drop_shadow(uint32_t *output, const uint32_t *input,
+                                   int width, int height, float offset_x,
+                                   float offset_y, float blur_radius,
+                                   uint32_t shadow_color, float opacity) {
+  int x = blockIdx.x * blockDim.x + threadIdx.x;
+  int y = blockIdx.y * blockDim.y + threadIdx.y;
+
+  if (x >= width || y >= height)
+    return;
+
+  int idx = y * width + x;
+  uint32_t pixel = input[idx];
+
+  // Sample from offset position for shadow
+  int shadow_x = static_cast<int>(x - offset_x);
+  int shadow_y = static_cast<int>(y - offset_y);
+
+  float shadow_alpha = 0.0f;
+  int blur_samples = static_cast<int>(blur_radius);
+
+  if (blur_samples < 1)
+    blur_samples = 1;
+
+  // Blur sample for soft shadow
+  for (int dy = -blur_samples; dy <= blur_samples; ++dy) {
+    for (int dx = -blur_samples; dx <= blur_samples; ++dx) {
+      int sx = clamp_f(static_cast<float>(shadow_x + dx), 0.0f,
+                       static_cast<float>(width - 1));
+      int sy = clamp_f(static_cast<float>(shadow_y + dy), 0.0f,
+                       static_cast<float>(height - 1));
+
+      uint32_t sample = input[sy * width + sx];
+      float sample_a = static_cast<float>((sample >> 24) & 0xFF) / 255.0f;
+
+      float dist = sqrtf(static_cast<float>(dx * dx + dy * dy));
+      float weight = fmaxf(0.0f, 1.0f - dist / blur_radius);
+
+      shadow_alpha += sample_a * weight;
+    }
+  }
+
+  shadow_alpha /=
+      static_cast<float>((blur_samples * 2 + 1) * (blur_samples * 2 + 1));
+  shadow_alpha *= opacity;
+
+  // Composite: shadow under original
+  float sr, sg, sb, sa;
+  unpack_rgba(shadow_color, sr, sg, sb, sa);
+
+  float orig_r, orig_g, orig_b, orig_a;
+  unpack_rgba(pixel, orig_r, orig_g, orig_b, orig_a);
+
+  // Porter-Duff over: original over shadow
+  float out_a = orig_a + shadow_alpha * (1.0f - orig_a);
+  if (out_a < 0.001f) {
+    output[idx] = 0;
+    return;
+  }
+
+  float inv_out_a = 1.0f / out_a;
+  float out_r =
+      (orig_r * orig_a + sr * shadow_alpha * (1.0f - orig_a)) * inv_out_a;
+  float out_g =
+      (orig_g * orig_a + sg * shadow_alpha * (1.0f - orig_a)) * inv_out_a;
+  float out_b =
+      (orig_b * orig_a + sb * shadow_alpha * (1.0f - orig_a)) * inv_out_a;
+
+  output[idx] = pack_rgba(out_r, out_g, out_b, out_a);
+}
+
+/**
+ * @brief Typewriter reveal animation kernel
+ * Progressively reveals text based on time
+ */
+__global__ void kernel_typewriter_reveal(uint32_t *output,
+                                         const uint32_t *input, int width,
+                                         int height, float progress,
+                                         int direction, float edge_softness) {
+  int x = blockIdx.x * blockDim.x + threadIdx.x;
+  int y = blockIdx.y * blockDim.y + threadIdx.y;
+
+  if (x >= width || y >= height)
+    return;
+
+  int idx = y * width + x;
+  uint32_t pixel = input[idx];
+
+  // Calculate reveal position based on direction
+  float reveal_pos;
+  switch (direction) {
+  case 0: // Left to right
+    reveal_pos = static_cast<float>(x) / width;
+    break;
+  case 1: // Right to left
+    reveal_pos = 1.0f - static_cast<float>(x) / width;
+    break;
+  case 2: // Top to bottom
+    reveal_pos = static_cast<float>(y) / height;
+    break;
+  case 3: // Bottom to top
+    reveal_pos = 1.0f - static_cast<float>(y) / height;
+    break;
+  default:
+    reveal_pos = static_cast<float>(x) / width;
+  }
+
+  // Smooth reveal with edge softness
+  float reveal_factor =
+      clamp_f((progress - reveal_pos) / edge_softness + 0.5f, 0.0f, 1.0f);
+
+  // Apply reveal factor to alpha
+  float r, g, b, a;
+  unpack_rgba(pixel, r, g, b, a);
+
+  output[idx] = pack_rgba(r, g, b, a * reveal_factor);
+}
+
+/**
+ * @brief Simple particle system kernel
+ * Generates particles emanating from text
+ */
+__global__ void kernel_particles(uint32_t *output, const uint32_t *input,
+                                 int width, int height, float time,
+                                 uint32_t seed, int particle_count,
+                                 uint32_t particle_color) {
+  int x = blockIdx.x * blockDim.x + threadIdx.x;
+  int y = blockIdx.y * blockDim.y + threadIdx.y;
+
+  if (x >= width || y >= height)
+    return;
+
+  int idx = y * width + x;
+
+  // Start with input
+  uint32_t pixel = input[idx];
+  float base_r, base_g, base_b, base_a;
+  unpack_rgba(pixel, base_r, base_g, base_b, base_a);
+
+  // Check if this pixel is near any particle
+  float particle_intensity = 0.0f;
+
+  for (int p = 0; p < particle_count && p < 100; ++p) {
+    // Deterministic particle position based on seed
+    uint32_t p_hash = hash_uint(seed + p * 7919);
+    float start_x = hash_to_float(p_hash) * width;
+    float start_y = hash_to_float(hash_uint(p_hash + 1)) * height;
+
+    // Particle velocity
+    float vel_x = (hash_to_float(hash_uint(p_hash + 2)) - 0.5f) * 100.0f;
+    float vel_y =
+        (hash_to_float(hash_uint(p_hash + 3)) - 0.5f) * 100.0f - 50.0f;
+
+    // Particle age
+    float particle_phase = hash_to_float(hash_uint(p_hash + 4));
+    float age = fmodf(time + particle_phase * 2.0f, 2.0f);
+
+    // Current position
+    float px = start_x + vel_x * age;
+    float py = start_y + vel_y * age + 0.5f * 50.0f * age * age; // gravity
+
+    // Distance to this pixel
+    float dx = x - px;
+    float dy = y - py;
+    float dist = sqrtf(dx * dx + dy * dy);
+
+    // Particle size (decreases with age)
+    float particle_size = 5.0f * (1.0f - age / 2.0f);
+
+    if (dist < particle_size) {
+      float intensity = (1.0f - dist / particle_size) * (1.0f - age / 2.0f);
+      particle_intensity = fmaxf(particle_intensity, intensity);
+    }
+  }
+
+  // Blend particle color
+  if (particle_intensity > 0.01f) {
+    float pr, pg, pb, pa;
+    unpack_rgba(particle_color, pr, pg, pb, pa);
+
+    float final_r = blend_screen(base_r, pr * particle_intensity);
+    float final_g = blend_screen(base_g, pg * particle_intensity);
+    float final_b = blend_screen(base_b, pb * particle_intensity);
+    float final_a = fmaxf(base_a, particle_intensity * pa);
+
+    output[idx] = pack_rgba(final_r, final_g, final_b, final_a);
+  } else {
+    output[idx] = pixel;
+  }
+}
+
+// ============================================================
+// Host Launch Functions for New Kernels
+// ============================================================
+
+extern "C" {
+
+void launch_text_stroke(uint32_t *output, const uint32_t *input, int width,
+                        int height, float stroke_width, uint32_t stroke_color,
+                        cudaStream_t stream) {
+  dim3 block(BLOCK_SIZE_X, BLOCK_SIZE_Y);
+  dim3 grid((width + block.x - 1) / block.x, (height + block.y - 1) / block.y);
+
+  kernel_text_stroke<<<grid, block, 0, stream>>>(output, input, width, height,
+                                                 stroke_width, stroke_color);
+}
+
+void launch_drop_shadow(uint32_t *output, const uint32_t *input, int width,
+                        int height, float offset_x, float offset_y,
+                        float blur_radius, uint32_t shadow_color, float opacity,
+                        cudaStream_t stream) {
+  dim3 block(BLOCK_SIZE_X, BLOCK_SIZE_Y);
+  dim3 grid((width + block.x - 1) / block.x, (height + block.y - 1) / block.y);
+
+  kernel_drop_shadow<<<grid, block, 0, stream>>>(
+      output, input, width, height, offset_x, offset_y, blur_radius,
+      shadow_color, opacity);
+}
+
+void launch_typewriter_reveal(uint32_t *output, const uint32_t *input,
+                              int width, int height, float progress,
+                              int direction, float edge_softness,
+                              cudaStream_t stream) {
+  dim3 block(BLOCK_SIZE_X, BLOCK_SIZE_Y);
+  dim3 grid((width + block.x - 1) / block.x, (height + block.y - 1) / block.y);
+
+  kernel_typewriter_reveal<<<grid, block, 0, stream>>>(
+      output, input, width, height, progress, direction, edge_softness);
+}
+
+void launch_particles(uint32_t *output, const uint32_t *input, int width,
+                      int height, float time, uint32_t seed, int particle_count,
+                      uint32_t particle_color, cudaStream_t stream) {
+  dim3 block(BLOCK_SIZE_X, BLOCK_SIZE_Y);
+  dim3 grid((width + block.x - 1) / block.x, (height + block.y - 1) / block.y);
+
+  kernel_particles<<<grid, block, 0, stream>>>(
+      output, input, width, height, time, seed, particle_count, particle_color);
 }
 
 } // extern "C"

@@ -183,19 +183,22 @@ void Renderer::render_text_layer(ImageBuffer &img, const TextLayer &layer,
   if (auto *box_anim = std::get_if<BoxHighlightAnimation>(&layer.animation)) {
     if (state.show_box && state.active_segment) {
       uint32_t box_color = parse_hex_color(box_anim->box_color);
-      std::cout << "🎨 Box color: " << box_anim->box_color << " -> 0x"
-                << std::hex << box_color << std::dec << std::endl;
+      float scale_factor = img.height / 1080.0f;
+
+      // Auto-scale box parameters
+      float scaled_padding = box_anim->box_padding * scale_factor;
+      float scaled_radius = box_anim->box_radius * scale_factor;
+
       float word_width = layer.style.font_size * 3;
       float word_height = layer.style.font_size;
 
-      int box_x = static_cast<int>(x - word_width / 2 - box_anim->box_padding);
-      int box_y = static_cast<int>(y - word_height / 2 - box_anim->box_padding);
+      int box_x = static_cast<int>(x - word_width / 2 - scaled_padding);
+      int box_y = static_cast<int>(y - word_height / 2 - scaled_padding);
 
-      draw_rounded_rect(
-          img, box_x, box_y,
-          static_cast<uint32_t>(word_width + box_anim->box_padding * 2),
-          static_cast<uint32_t>(word_height + box_anim->box_padding * 2),
-          box_anim->box_radius, box_color);
+      draw_rounded_rect(img, box_x, box_y,
+                        static_cast<uint32_t>(word_width + scaled_padding * 2),
+                        static_cast<uint32_t>(word_height + scaled_padding * 2),
+                        scaled_radius, box_color);
     }
   }
 
@@ -204,9 +207,18 @@ void Renderer::render_text_layer(ImageBuffer &img, const TextLayer &layer,
   float text_draw_y = y - layer.style.font_size / 2.0f;
 
   if (layer.style.stroke_width > 0) {
+    // Auto-scale stroke width based on resolution (Baseline: 1080p)
+    // This ensures 4px stroke looks proportional on 4K (scales to ~8px)
+    float scale_factor = img.height / 1080.0f;
+    float scaled_stroke = layer.style.stroke_width * scale_factor;
+
+    // Ensure minimum visibility (at least 1px if stroke is defined)
+    if (scaled_stroke < 1.0f)
+      scaled_stroke = 1.0f;
+
     draw_text_with_stroke(img, layer.content, x, text_draw_y,
                           layer.style.font_size, text_color, stroke_color,
-                          layer.style.stroke_width);
+                          scaled_stroke);
   } else {
     draw_text(img, layer.content, x, text_draw_y, layer.style.font_size,
               text_color);

@@ -4,6 +4,7 @@
  * @brief Template data structures for caption definitions
  */
 
+#include "gpu/backend.hpp"
 #include <optional>
 #include <string>
 #include <variant>

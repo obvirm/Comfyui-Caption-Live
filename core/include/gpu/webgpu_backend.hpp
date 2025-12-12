@@ -6,11 +6,28 @@
 
 #include "gpu/backend.hpp"
 
+// Check for WebGPU availability
 #ifdef __EMSCRIPTEN__
 #include <webgpu/webgpu.h>
-#else
-// Dawn (native WebGPU)
+#define CE_HAS_WEBGPU 1
+#elif __has_include(<dawn/webgpu.h>)
 #include <dawn/webgpu.h>
+#define CE_HAS_WEBGPU 1
+#elif __has_include(<webgpu/webgpu.h>)
+#include <webgpu/webgpu.h>
+#define CE_HAS_WEBGPU 1
+#else
+// Stub types for compilation without WebGPU SDK
+#define CE_HAS_WEBGPU 0
+typedef void *WGPUDevice;
+typedef void *WGPUQueue;
+typedef void *WGPUBuffer;
+typedef void *WGPUTexture;
+typedef void *WGPUShaderModule;
+typedef void *WGPUComputePipeline;
+typedef void *WGPURenderPipeline;
+typedef void *WGPUCommandEncoder;
+typedef void *WGPUCommandBuffer;
 #endif
 
 namespace CaptionEngine {

@@ -76,6 +76,7 @@ class CaptionLiveNode:
             },
             "optional": {
                 "style": (["box", "typewriter", "bounce", "colored"], {"default": "box"}),
+                "font_path": ("STRING", {"default": "", "multiline": False}),
                 "highlight_color": ("STRING", {"default": "#39E55F"}),
                 "text_color": ("STRING", {"default": "#FFFFFF"}),
                 "stroke_color": ("STRING", {"default": "#000000"}),
@@ -91,7 +92,7 @@ class CaptionLiveNode:
     CATEGORY = "Caption Live"
 
     def build_template(self, width, height, duration, text, font_size, 
-                       style, highlight_color, text_color, stroke_color, 
+                       style, font_path, highlight_color, text_color, stroke_color, 
                        stroke_width, pos_x, pos_y, segments_str):
         """Build template JSON for caption_engine"""
         # Parse segments
@@ -135,6 +136,7 @@ class CaptionLiveNode:
         # Font scaling - same as frontend (relative to 1080p height)
         scale_factor = height / 1080.0
         scaled_font_size = font_size * scale_factor
+        scaled_stroke_width = max(1.5, stroke_width * scale_factor) # Ensure visibility and scaling parity
         
         # Build content from segments (same as frontend)
         content = " ".join([s.get("text", "") for s in segments]) if segments else text
@@ -148,9 +150,10 @@ class CaptionLiveNode:
                 "content": content,
                 "style": {
                     "font_size": scaled_font_size,
+                    "font_path": font_path if font_path else None,
                     "color": text_color,
                     "stroke_color": stroke_color,
-                    "stroke_width": stroke_width
+                    "stroke_width": scaled_stroke_width
                 },
                 "position": {"x": pos_x, "y": pos_y},
                 "animation": animation
@@ -160,7 +163,7 @@ class CaptionLiveNode:
         return json.dumps(template)
 
     def process(self, images, text, font_size, duration, aspect_ratio="16:9",
-                style="box", highlight_color="#39E55F", text_color="#FFFFFF",
+                style="box", font_path="", highlight_color="#39E55F", text_color="#FFFFFF",
                 stroke_color="#000000", stroke_width=4.0, pos_x=0.5, pos_y=0.8, 
                 segments="[]"):
         
@@ -175,7 +178,7 @@ class CaptionLiveNode:
         # Build template JSON (Scene Description)
         template_json = self.build_template(
             width, height, duration, text, font_size,
-            style, highlight_color, text_color, stroke_color,
+            style, font_path, highlight_color, text_color, stroke_color,
             stroke_width, pos_x, pos_y, segments
         )
 

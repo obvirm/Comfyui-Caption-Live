@@ -114,5 +114,72 @@ extern "C" void launch_composite(uint32_t *output, const uint32_t *background,
                                  int height, float opacity,
                                  cudaStream_t stream);
 
+/**
+ * @brief Launch text stroke/outline kernel
+ * @param output Output pixel buffer
+ * @param input Input pixel buffer
+ * @param width Image width
+ * @param height Image height
+ * @param stroke_width Stroke width in pixels
+ * @param stroke_color Stroke color (packed RGBA)
+ * @param stream CUDA stream
+ */
+extern "C" void launch_text_stroke(uint32_t *output, const uint32_t *input,
+                                   int width, int height, float stroke_width,
+                                   uint32_t stroke_color, cudaStream_t stream);
+
+/**
+ * @brief Launch drop shadow kernel
+ * @param output Output pixel buffer
+ * @param input Input pixel buffer
+ * @param width Image width
+ * @param height Image height
+ * @param offset_x Shadow offset X in pixels
+ * @param offset_y Shadow offset Y in pixels
+ * @param blur_radius Shadow blur radius
+ * @param shadow_color Shadow color (packed RGBA)
+ * @param opacity Shadow opacity (0.0-1.0)
+ * @param stream CUDA stream
+ */
+extern "C" void launch_drop_shadow(uint32_t *output, const uint32_t *input,
+                                   int width, int height, float offset_x,
+                                   float offset_y, float blur_radius,
+                                   uint32_t shadow_color, float opacity,
+                                   cudaStream_t stream);
+
+/**
+ * @brief Launch typewriter reveal animation kernel
+ * @param output Output pixel buffer
+ * @param input Input pixel buffer
+ * @param width Image width
+ * @param height Image height
+ * @param progress Animation progress (0.0-1.0)
+ * @param direction Reveal direction (0=LTR, 1=RTL, 2=TTB, 3=BTT)
+ * @param edge_softness Edge softness for smooth reveal
+ * @param stream CUDA stream
+ */
+extern "C" void launch_typewriter_reveal(uint32_t *output,
+                                         const uint32_t *input, int width,
+                                         int height, float progress,
+                                         int direction, float edge_softness,
+                                         cudaStream_t stream);
+
+/**
+ * @brief Launch particle system kernel
+ * @param output Output pixel buffer
+ * @param input Input pixel buffer
+ * @param width Image width
+ * @param height Image height
+ * @param time Current time in seconds
+ * @param seed Random seed for deterministic particles
+ * @param particle_count Number of particles to render
+ * @param particle_color Particle color (packed RGBA)
+ * @param stream CUDA stream
+ */
+extern "C" void launch_particles(uint32_t *output, const uint32_t *input,
+                                 int width, int height, float time,
+                                 uint32_t seed, int particle_count,
+                                 uint32_t particle_color, cudaStream_t stream);
+
 } // namespace CUDA
 } // namespace CaptionEngine

@@ -1,123 +1,121 @@
 /**
  * @file cpu_backend.cpp
- * @brief CPU fallback compute backend
+ * @brief CPU fallback compute backend implementation
  */
 
-#include "graphics/backend.hpp"
-#include <atomic>
+#include "compute/unified_backend.hpp"
+#include <algorithm> // for std::min, std::copy
+#include <cstring>
+#include <iostream>
 #include <unordered_map>
 
+
 namespace CaptionEngine {
+namespace Compute {
 
 struct CPUBackend::Impl {
-  std::unordered_map<BufferHandle, std::vector<uint8_t>> buffers;
-  std::atomic<BufferHandle> next_handle{1};
+  struct Buffer {
+    std::vector<uint8_t> data;
+    BufferUsage usage;
+    MemoryType type;
+  };
+  std::unordered_map<BufferHandle, Buffer> buffers;
+  BufferHandle next_buffer_id = 1;
 };
 
 CPUBackend::CPUBackend() : pimpl_(std::make_unique<Impl>()) {}
 CPUBackend::~CPUBackend() = default;
 
-BufferHandle CPUBackend::create_buffer(size_t size, MemoryType /*type*/) {
-  BufferHandle handle = pimpl_->next_handle++;
-  pimpl_->buffers[handle] = std::vector<uint8_t>(size, 0);
-  return handle;
+BackendInfo CPUBackend::get_info() const {
+  return {"CPU Fallback",
+          "Generic",
+          "1.0",
+          0, // Memory info not tracked
+          0,
+          1,
+          1,
+          {1, 1, 1},
+          BackendCapability::None,
+          false,
+          false};
+}
+
+bool CPUBackend::initialize() { return true; }
+void CPUBackend::shutdown() {}
+
+BufferHandle CPUBackend::create_buffer(size_t size, BufferUsage usage,
+                                       MemoryType type) {
+  auto id = pimpl_->next_buffer_id++;
+  Impl::Buffer buf;
+  buf.data.resize(size);
+  buf.usage = usage;
+  buf.type = type;
+  pimpl_->buffers[id] = std::move(buf);
+  return id;
 }
 
 void CPUBackend::destroy_buffer(BufferHandle handle) {
   pimpl_->buffers.erase(handle);
 }
 
-void CPUBackend::upload_buffer(BufferHandle handle,
-                               std::span<const uint8_t> data) {
+void CPUBackend::upload(BufferHandle handle, std::span<const uint8_t> data,
+                        size_t offset) {
   auto it = pimpl_->buffers.find(handle);
   if (it != pimpl_->buffers.end()) {
-    std::copy(data.begin(), data.end(), it->second.begin());
-  }
-}
-
-std::vector<uint8_t> CPUBackend::download_buffer(BufferHandle handle,
-                                                 size_t size) {
-  auto it = pimpl_->buffers.find(handle);
-  if (it != pimpl_->buffers.end()) {
-    size_t copy_size = std::min(size, it->second.size());
-    return std::vector<uint8_t>(it->second.begin(),
-                                it->second.begin() + copy_size);
-  }
-  return {};
-}
-
-// Note: MemoryType enum is defined in backend.hpp -> include/compute/types.hpp?
-// No, backend.hpp includes types.hpp. But backend.hpp defines MemoryType
-// independently in previous version. My rewrite of backend.hpp kept MemoryType
-// inside backend.hpp because it wasn't in `types.hpp`. Wait, `types.hpp` had
-// ParamType etc. Verify backend.hpp content again? I overwrote backend.hpp with
-// MemoryType definition. So it's fine.
-
-// Note: WorkgroupSize vs WorkGroupSize.
-// I used `WorkGroupSize` in `types.hpp` but `WorkgroupSize` in `backend.hpp`
-// previous version. My `backend.hpp` rewrite used `WorkGroupSize` in
-// `dispatch_compute` but struct remains named `WorkgroupSize`? Let's check
-// `types.hpp`. `struct WorkGroupSize { ... }`. Let's check `backend.hpp`
-// overwritten content.
-// ... `virtual void dispatch_compute(std::string_view shader_name, ...,
-// WorkGroupSize workgroups) = 0;` (I used UpperCamel). But I removed the struct
-// definition from `backend.hpp`? The rewrite included "compute/types.hpp". The
-// previous `backend.hpp` had `struct WorkgroupSize`. My rewrite removed it
-// (implied by types.hpp include? Or I missed it?). The rewrite content I sent:
-// `#include "compute/types.hpp"` ... `using BufferHandle = ...` ... `enum class
-// MemoryType`. I did NOT redefine `WorkGroupSize` in backend.hpp. I used it
-// from `types.hpp`. So the type is `CaptionEngine::WorkGroupSize`. The cpu
-// backend overrides must match.
-
-void CPUBackend::dispatch_compute(std::string_view /*shader_name*/,
-                                  std::span<BufferHandle> /*buffers*/,
-                                  WorkGroupSize /*workgroups*/
-) {
-  // CPU compute implementation
-  // For now, no-op - compute shaders would be implemented as C++ functions
-}
-
-bool CPUBackend::register_kernel(const ComputeKernel & /*kernel*/) {
-  // CPU backend could support software kernels here
-  return true;
-}
-
-void CPUBackend::synchronize() {
-  // No-op for CPU - all operations are synchronous
-}
-
-// Factory functions
-std::unique_ptr<ComputeBackend> ComputeBackend::create_best() {
-#ifdef __EMSCRIPTEN__
-  // On Web (WASM), prefer WebGPU if available
-  auto webgpu = std::make_unique<WebGPUBackend>();
-  if (webgpu->initialize()) {
-    return webgpu;
-  }
-  // Fallback to CPU
-#endif
-  return std::make_unique<CPUBackend>();
-}
-
-std::unique_ptr<ComputeBackend>
-ComputeBackend::create(const std::string &name) {
-  if (name == "CPU" || name == "cpu") {
-    return std::make_unique<CPUBackend>();
-  }
-  if (name == "WebGPU" || name == "webgpu") {
-#if defined(__EMSCRIPTEN__)
-    auto backend = std::make_unique<WebGPUBackend>();
-    if (backend->initialize()) {
-      return backend;
+    if (offset + data.size() <= it->second.data.size()) {
+      std::memcpy(it->second.data.data() + offset, data.data(), data.size());
     }
-    // If initialization fails, fall back to CPU?
-    return std::make_unique<CPUBackend>();
-#else
-    // WebGPU not supported on this platform
-    return std::make_unique<CPUBackend>();
-#endif
   }
-  return create_best();
 }
 
+void CPUBackend::download(BufferHandle handle, std::span<uint8_t> data,
+                          size_t offset) {
+  auto it = pimpl_->buffers.find(handle);
+  if (it != pimpl_->buffers.end()) {
+    size_t copy_size = std::min(data.size(), it->second.data.size() - offset);
+    std::memcpy(data.data(), it->second.data.data() + offset, copy_size);
+  }
+}
+
+void CPUBackend::copy(BufferHandle src, BufferHandle dst, size_t size,
+                      size_t src_offset, size_t dst_offset) {
+  auto src_it = pimpl_->buffers.find(src);
+  auto dst_it = pimpl_->buffers.find(dst);
+  if (src_it != pimpl_->buffers.end() && dst_it != pimpl_->buffers.end()) {
+    // Simple copy validation
+    if (src_offset + size <= src_it->second.data.size() &&
+        dst_offset + size <= dst_it->second.data.size()) {
+      std::memcpy(dst_it->second.data.data() + dst_offset,
+                  src_it->second.data.data() + src_offset, size);
+    }
+  }
+}
+
+void *CPUBackend::map(BufferHandle handle, size_t offset, size_t size) {
+  auto it = pimpl_->buffers.find(handle);
+  if (it != pimpl_->buffers.end()) {
+    return it->second.data.data() + offset;
+  }
+  return nullptr;
+}
+
+void CPUBackend::unmap(BufferHandle /*handle*/) {}
+
+// Kernel stubs
+KernelHandle CPUBackend::create_kernel(std::span<const uint8_t>,
+                                       std::string_view) {
+  return 0;
+}
+void CPUBackend::destroy_kernel(KernelHandle) {}
+void CPUBackend::bind_buffer(KernelHandle, uint32_t, BufferHandle) {}
+void CPUBackend::set_push_constants(KernelHandle, std::span<const uint8_t>) {}
+void CPUBackend::dispatch(KernelHandle, uint32_t, uint32_t, uint32_t) {}
+void CPUBackend::dispatch_indirect(KernelHandle, BufferHandle, size_t) {}
+
+void CPUBackend::barrier() {}
+void CPUBackend::synchronize() {}
+void CPUBackend::begin_recording() {}
+void CPUBackend::end_recording() {}
+
+} // namespace Compute
 } // namespace CaptionEngine

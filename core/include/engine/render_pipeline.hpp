@@ -8,16 +8,27 @@
  */
 
 #include "gpu/backend.hpp"
-#include "gpu/cuda_backend.hpp"
-#include "gpu/vulkan_backend.hpp"
-#include "gpu/webgpu_backend.hpp"
-#include "text/sdf_text_renderer.hpp"
+#include "text/types.hpp" // Shared TextStyle, TextAlign
+#include <glm/glm.hpp>
 
+// Forward declarations - avoid including all backend headers
+namespace CaptionEngine {
+namespace GPU {
+class VulkanBackend;
+class WebGPUBackend;
+class CUDABackend;
+} // namespace GPU
+namespace Text {
+class SDFTextRenderer;
+class SDFAtlas;
+} // namespace Text
+} // namespace CaptionEngine
 
 #include <chrono>
 #include <functional>
 #include <memory>
-
+#include <string>
+#include <vector>
 
 namespace CaptionEngine {
 
@@ -37,26 +48,27 @@ struct FrameTiming {
   float deltaTime = 0.0f;   ///< Time since last frame
 };
 
+/// Caption segment for animation
+struct CaptionSegment {
+  std::string text;
+  double start = 0.0;
+  double end = 0.0;
+};
+
 /// Caption layer data
 struct CaptionLayer {
   std::string text;
   glm::vec2 position = {0.5f, 0.8f}; ///< Normalized [0-1]
-  Text::TextStyle textStyle;
+  TextStyle textStyle;
 
   // Animation
   struct Animation {
     std::string type = "none"; ///< box, typewriter, bounce, etc.
-    std::vector<struct Segment> segments;
+    std::vector<CaptionSegment> segments;
     glm::vec4 highlightColor = {0.22f, 0.90f, 0.37f, 1.0f}; // #39E55F
     float boxRadius = 8.0f;
     float boxPadding = 8.0f;
   } animation;
-
-  struct Segment {
-    std::string text;
-    double start = 0.0;
-    double end = 0.0;
-  };
 };
 
 /// Full scene template
@@ -151,6 +163,10 @@ public:
 private:
   struct Impl;
   std::unique_ptr<Impl> pimpl_;
+
+  // Private helper
+  void renderCaptionLayer(const CaptionLayer &layer, const FrameTiming &timing,
+                          GPU::CommandBuffer *cmd);
 };
 
 /**

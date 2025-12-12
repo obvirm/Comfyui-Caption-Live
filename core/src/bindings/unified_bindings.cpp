@@ -10,12 +10,16 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
+// ssize_t compatibility for MSVC
+#ifdef _MSC_VER
+#include <BaseTsd.h>
+typedef SSIZE_T ssize_t;
+#endif
 
 #include "engine/render_pipeline.hpp"
 
 namespace py = pybind11;
-
-namespace CaptionEngine {
+using namespace CaptionEngine;
 
 PYBIND11_MODULE(caption_engine_unified, m) {
   m.doc() = "Caption Engine - Unified GPU Rendering Pipeline";
@@ -43,11 +47,11 @@ PYBIND11_MODULE(caption_engine_unified, m) {
       .def_readwrite("frame_index", &FrameTiming::frameIndex)
       .def_readwrite("delta_time", &FrameTiming::deltaTime);
 
-  // Text style
-  py::class_<Text::TextStyle>(m, "TextStyle")
+  // Text style (now in CaptionEngine namespace)
+  py::class_<TextStyle>(m, "TextStyle")
       .def(py::init<>())
-      .def_readwrite("font_size", &Text::TextStyle::fontSize)
-      .def_readwrite("outline_width", &Text::TextStyle::outlineWidth);
+      .def_readwrite("font_size", &TextStyle::fontSize)
+      .def_readwrite("outline_width", &TextStyle::outlineWidth);
 
   // Caption layer
   py::class_<CaptionLayer>(m, "CaptionLayer")
@@ -72,8 +76,11 @@ PYBIND11_MODULE(caption_engine_unified, m) {
       .def_readonly("timestamp", &FrameOutput::timestamp)
       .def_readonly("checksum", &FrameOutput::checksum)
       .def("to_numpy", [](const FrameOutput &self) {
-        return py::array_t<uint8_t>({self.height, self.width, 4u},
-                                    {self.width * 4, 4, 1}, self.pixels.data());
+        std::vector<ssize_t> shape = {static_cast<ssize_t>(self.height),
+                                      static_cast<ssize_t>(self.width), 4};
+        std::vector<ssize_t> strides = {static_cast<ssize_t>(self.width * 4), 4,
+                                        1};
+        return py::array_t<uint8_t>(shape, strides, self.pixels.data());
       });
 
   // Render Pipeline
@@ -153,12 +160,12 @@ PYBIND11_MODULE(caption_engine_unified, m) {
             scene, timing, static_cast<const uint8_t *>(buf.ptr), w, h);
 
         // Return as numpy array
-        return py::array_t<uint8_t>({output.height, output.width, 4u},
-                                    {output.width * 4, 4, 1},
-                                    output.pixels.data());
+        std::vector<ssize_t> shape = {static_cast<ssize_t>(output.height),
+                                      static_cast<ssize_t>(output.width), 4};
+        std::vector<ssize_t> strides = {static_cast<ssize_t>(output.width * 4),
+                                        4, 1};
+        return py::array_t<uint8_t>(shape, strides, output.pixels.data());
       },
       "Process frame with scene template (compatibility API)",
       py::arg("template_json"), py::arg("time"), py::arg("input_image"));
 }
-
-} // namespace CaptionEngine

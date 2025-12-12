@@ -8,13 +8,16 @@
 
 #include "core/embedded_font.hpp" // Embedded Roboto-Bold font data
 #include "engine/renderer.hpp"
+#include "gpu/backend.hpp" // Fix for libc++ rebind_pointer_t
 
 
 #define STB_TRUETYPE_IMPLEMENTATION
 #include <stb/stb_truetype.h>
 
 #include <cmath>
+#include <cstdio>
 #include <iostream>
+#include <string>
 #include <vector>
 
 namespace CaptionEngine {
@@ -22,23 +25,102 @@ namespace CaptionEngine {
 // Font state
 static stbtt_fontinfo g_font_info;
 static bool g_font_initialized = false;
+static std::vector<uint8_t> g_font_data; // Buffer for file-loaded font
+static std::string g_current_font_path;  // Currently loaded font path
 
-// Initialize font from EMBEDDED data (guaranteed to work everywhere)
+// Load font from file
+bool load_font_from_file(const std::string &font_path) {
+  if (font_path.empty()) {
+    return false;
+  }
+
+  // If same font already loaded, skip
+  if (g_font_initialized && g_current_font_path == font_path) {
+    return true;
+  }
+
+  std::cout << "🔤 Loading font from file: " << font_path << std::endl;
+
+  // Read font file
+  FILE *f = fopen(font_path.c_str(), "rb");
+  if (!f) {
+    std::cerr << "❌ Cannot open font file: " << font_path << std::endl;
+    return false;
+  }
+
+  fseek(f, 0, SEEK_END);
+  size_t size = ftell(f);
+  fseek(f, 0, SEEK_SET);
+
+  g_font_data.resize(size);
+  size_t read = fread(g_font_data.data(), 1, size, f);
+  fclose(f);
+
+  if (read != size) {
+    std::cerr << "❌ Failed to read font file: " << font_path << std::endl;
+    g_font_data.clear();
+    return false;
+  }
+
+  // Initialize font
+  int offset = stbtt_GetFontOffsetForIndex(g_font_data.data(), 0);
+  if (offset < 0) {
+    std::cerr << "❌ Invalid font file format: " << font_path << std::endl;
+    g_font_data.clear();
+    return false;
+  }
+
+  if (stbtt_InitFont(&g_font_info, g_font_data.data(), offset)) {
+    g_font_initialized = true;
+    g_current_font_path = font_path;
+    std::cout << "✅ Font loaded from file successfully! (" << size << " bytes)"
+              << std::endl;
+    return true;
+  }
+
+  std::cerr << "❌ Failed to initialize font from file!" << std::endl;
+  g_font_data.clear();
+  return false;
+}
+
+// Initialize font from EMBEDDED data (fallback)
 static bool init_font() {
   if (g_font_initialized)
     return true;
 
-  std::cout << "� Initializing EMBEDDED font (" << EMBEDDED_FONT_SIZE
+  std::cout << "🔤 Initializing EMBEDDED font (" << EMBEDDED_FONT_SIZE
             << " bytes)..." << std::endl;
 
+  // Debug: Print first few bytes to verify data
+  std::cout << "   First 4 bytes: 0x" << std::hex << (int)EMBEDDED_FONT[0]
+            << " 0x" << (int)EMBEDDED_FONT[1] << " 0x" << (int)EMBEDDED_FONT[2]
+            << " 0x" << (int)EMBEDDED_FONT[3] << std::dec << std::endl;
+
+  // Get the font offset for index 0 (first font in collection/file)
+  int offset = stbtt_GetFontOffsetForIndex(EMBEDDED_FONT, 0);
+  std::cout << "   Font offset for index 0: " << offset << std::endl;
+
+  if (offset < 0) {
+    std::cerr << "❌ Invalid font data (offset < 0)!" << std::endl;
+    return false;
+  }
+
   // Use embedded font data directly - no file I/O needed!
-  if (stbtt_InitFont(&g_font_info, EMBEDDED_FONT, 0)) {
+  int result = stbtt_InitFont(&g_font_info, EMBEDDED_FONT, offset);
+  std::cout << "   stbtt_InitFont result: " << result << std::endl;
+
+  if (result) {
     g_font_initialized = true;
-    std::cout << "✅ Embedded font initialized successfully!" << std::endl;
+    g_current_font_path = ""; // embedded font
+    std::cout << "✅ Embedded font initialized successfully! (offset=" << offset
+              << ")" << std::endl;
     return true;
   }
 
   std::cerr << "❌ Failed to initialize embedded font!" << std::endl;
+  std::cerr << "   EMBEDDED_FONT pointer: " << (void *)EMBEDDED_FONT
+            << std::endl;
+  std::cerr << "   EMBEDDED_FONT_SIZE: " << EMBEDDED_FONT_SIZE << std::endl;
   return false;
 }
 

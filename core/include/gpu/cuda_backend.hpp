@@ -91,6 +91,7 @@ private:
 // CUDA Kernel Helpers
 // ============================================================================
 
+#ifdef __CUDACC__
 /// Launch configuration for CUDA kernels
 struct CUDALaunchConfig {
   dim3 grid;
@@ -110,6 +111,7 @@ inline dim3 calcGridSize(uint32_t width, uint32_t height, dim3 block) {
   return dim3((width + block.x - 1) / block.x, (height + block.y - 1) / block.y,
               1);
 }
+#endif // __CUDACC__
 
 } // namespace GPU
 } // namespace CaptionEngine

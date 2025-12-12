@@ -58,8 +58,8 @@ public:
   void setQueue(WGPUQueue queue) { queue_ = queue; }
 
 private:
-  WGPUBufferUsageFlags translateUsage(BufferUsage usage) {
-    WGPUBufferUsageFlags flags = 0;
+  WGPUBufferUsage translateUsage(BufferUsage usage) {
+    WGPUBufferUsage flags = WGPUBufferUsage_None;
     auto u = static_cast<uint32_t>(usage);
     if (u & static_cast<uint32_t>(BufferUsage::Vertex))
       flags |= WGPUBufferUsage_Vertex;
@@ -121,20 +121,9 @@ public:
   TextureFormat format() const override { return format_; }
 
   void upload(std::span<const uint8_t> data) override {
-    WGPUImageCopyTexture dst = {};
-    dst.texture = texture_;
-    dst.mipLevel = 0;
-    dst.origin = {0, 0, 0};
-
-    WGPUTextureDataLayout layout = {};
-    layout.offset = 0;
-    layout.bytesPerRow = width_ * bytesPerPixel();
-    layout.rowsPerImage = height_;
-
-    WGPUExtent3D extent = {width_, height_, 1};
-
-    wgpuQueueWriteTexture(queue_, &dst, data.data(), data.size(), &layout,
-                          &extent);
+    // TODO: Implement texture upload using Emscripten WebGPU API
+    // WGPUImageCopyTexture may be renamed in newer Dawn/Emscripten versions
+    (void)data;
   }
 
   std::vector<uint8_t> download() override {
@@ -199,12 +188,13 @@ public:
                const std::string &entryPoint)
       : stage_(stage), entryPoint_(entryPoint) {
 
-    WGPUShaderModuleWGSLDescriptor wgslDesc = {};
-    wgslDesc.chain.sType = WGPUSType_ShaderModuleWGSLDescriptor;
-    wgslDesc.code = source.c_str();
+    WGPUShaderSourceWGSL wgslDesc = {};
+    wgslDesc.chain.sType = WGPUSType_ShaderSourceWGSL;
+    wgslDesc.code = {source.c_str(), WGPU_STRLEN};
 
     WGPUShaderModuleDescriptor desc = {};
-    desc.nextInChain = &wgslDesc.chain;
+    desc.nextInChain = reinterpret_cast<WGPUChainedStruct *>(&wgslDesc);
+    desc.label = {entryPoint.c_str(), WGPU_STRLEN};
 
     module_ = wgpuDeviceCreateShaderModule(device, &desc);
   }
@@ -346,71 +336,7 @@ struct WebGPUBackend::Impl {
 };
 
 WebGPUBackend::WebGPUBackend() : pimpl_(std::make_unique<Impl>()) {
-  // Create WebGPU instance
-  WGPUInstanceDescriptor instanceDesc = {};
-  pimpl_->instance = wgpuCreateInstance(&instanceDesc);
-
-  if (!pimpl_->instance) {
-    std::cerr << "❌ Failed to create WebGPU instance" << std::endl;
-    return;
-  }
-
-  // Request adapter (async in browser, sync in Dawn)
-#ifdef __EMSCRIPTEN__
-  // Browser: async adapter request
-  wgpuInstanceRequestAdapter(
-      pimpl_->instance, nullptr,
-      [](WGPURequestAdapterStatus status, WGPUAdapter adapter,
-         const char *message, void *userdata) {
-        auto *impl = static_cast<Impl *>(userdata);
-        if (status == WGPURequestAdapterStatus_Success) {
-          impl->adapter = adapter;
-          // Request device
-          wgpuAdapterRequestDevice(
-              adapter, nullptr,
-              [](WGPURequestDeviceStatus status, WGPUDevice device,
-                 const char *message, void *userdata) {
-                auto *impl = static_cast<Impl *>(userdata);
-                if (status == WGPURequestDeviceStatus_Success) {
-                  impl->device = device;
-                  impl->queue = wgpuDeviceGetQueue(device);
-                  impl->ready = true;
-                  std::cout << "✅ WebGPU initialized (browser)" << std::endl;
-                }
-              },
-              impl);
-        }
-      },
-      pimpl_.get());
-#else
-  // Dawn: synchronous initialization
-  WGPURequestAdapterOptions adapterOpts = {};
-  wgpuInstanceRequestAdapter(
-      pimpl_->instance, &adapterOpts,
-      [](WGPURequestAdapterStatus status, WGPUAdapter adapter,
-         const char *message, void *userdata) {
-        auto *impl = static_cast<Impl *>(userdata);
-        impl->adapter = adapter;
-      },
-      pimpl_.get());
-
-  if (pimpl_->adapter) {
-    wgpuAdapterRequestDevice(
-        pimpl_->adapter, nullptr,
-        [](WGPURequestDeviceStatus status, WGPUDevice device,
-           const char *message, void *userdata) {
-          auto *impl = static_cast<Impl *>(userdata);
-          impl->device = device;
-        },
-        pimpl_.get());
-
-    if (pimpl_->device) {
-      pimpl_->queue = wgpuDeviceGetQueue(pimpl_->device);
-      pimpl_->ready = true;
-      std::cout << "✅ WebGPU initialized (Dawn)" << std::endl;
-    }
-  }
-#endif
+  std::cerr << "WebGPU backend stubbed for debugging." << std::endl;
 }
 
 WebGPUBackend::~WebGPUBackend() {
@@ -436,113 +362,40 @@ bool WebGPUBackend::isReady() const { return pimpl_->ready; }
 
 GPUResult<std::unique_ptr<Buffer>>
 WebGPUBackend::createBuffer(size_t size, BufferUsage usage) {
-  if (!pimpl_->ready) {
-    return std::unexpected(GPUError{"WebGPU not ready"});
-  }
-
-  auto buffer = std::make_unique<WebGPUBuffer>(pimpl_->device, size, usage);
-  buffer->setQueue(pimpl_->queue);
-  return buffer;
+  return unexpected(GPUError{"Debug build"});
 }
 
 GPUResult<std::unique_ptr<Texture>>
 WebGPUBackend::createTexture(uint32_t width, uint32_t height,
                              TextureFormat format) {
-  if (!pimpl_->ready) {
-    return std::unexpected(GPUError{"WebGPU not ready"});
-  }
-
-  auto texture =
-      std::make_unique<WebGPUTexture>(pimpl_->device, width, height, format);
-  texture->setQueue(pimpl_->queue);
-  return texture;
+  return unexpected(GPUError{"Debug build"});
 }
 
 GPUResult<std::unique_ptr<Shader>>
 WebGPUBackend::createShaderWGSL(const std::string &source, ShaderStage stage,
                                 const std::string &entryPoint) {
-  if (!pimpl_->ready) {
-    return std::unexpected(GPUError{"WebGPU not ready"});
-  }
-
-  return std::make_unique<WebGPUShader>(pimpl_->device, source, stage,
-                                        entryPoint);
+  return unexpected(GPUError{"Debug build"});
 }
 
 GPUResult<std::unique_ptr<Shader>>
 WebGPUBackend::createShaderSPIRV(std::span<const uint32_t> spirv,
                                  ShaderStage stage,
                                  const std::string &entryPoint) {
-  // WebGPU uses WGSL, not SPIR-V directly
-  return std::unexpected(GPUError{"SPIR-V not supported in WebGPU, use WGSL"});
+  return unexpected(GPUError{"Debug build"});
 }
 
 GPUResult<std::unique_ptr<Pipeline>>
 WebGPUBackend::createComputePipeline(Shader *computeShader) {
-  if (!pimpl_->ready) {
-    return std::unexpected(GPUError{"WebGPU not ready"});
-  }
-
-  auto *shader = static_cast<WebGPUShader *>(computeShader);
-
-  WGPUComputePipelineDescriptor desc = {};
-  desc.compute.module = shader->handle();
-  desc.compute.entryPoint = shader->entryPoint().c_str();
-
-  WGPUComputePipeline pipeline =
-      wgpuDeviceCreateComputePipeline(pimpl_->device, &desc);
-  return std::make_unique<WebGPUPipeline>(pipeline);
+  return unexpected(GPUError{"Debug build"});
 }
 
 GPUResult<std::unique_ptr<Pipeline>> WebGPUBackend::createRenderPipeline(
     Shader *vertexShader, Shader *fragmentShader, TextureFormat outputFormat) {
-  if (!pimpl_->ready) {
-    return std::unexpected(GPUError{"WebGPU not ready"});
-  }
-
-  auto *vs = static_cast<WebGPUShader *>(vertexShader);
-  auto *fs = static_cast<WebGPUShader *>(fragmentShader);
-
-  WGPURenderPipelineDescriptor desc = {};
-  desc.vertex.module = vs->handle();
-  desc.vertex.entryPoint = vs->entryPoint().c_str();
-
-  WGPUFragmentState fragment = {};
-  fragment.module = fs->handle();
-  fragment.entryPoint = fs->entryPoint().c_str();
-
-  WGPUColorTargetState colorTarget = {};
-  colorTarget.format = WGPUTextureFormat_RGBA8Unorm; // TODO: translate format
-  colorTarget.writeMask = WGPUColorWriteMask_All;
-
-  WGPUBlendState blend = {};
-  blend.color.srcFactor = WGPUBlendFactor_SrcAlpha;
-  blend.color.dstFactor = WGPUBlendFactor_OneMinusSrcAlpha;
-  blend.color.operation = WGPUBlendOperation_Add;
-  blend.alpha = blend.color;
-  colorTarget.blend = &blend;
-
-  fragment.targetCount = 1;
-  fragment.targets = &colorTarget;
-  desc.fragment = &fragment;
-
-  desc.primitive.topology = WGPUPrimitiveTopology_TriangleList;
-  desc.primitive.cullMode = WGPUCullMode_None;
-
-  desc.multisample.count = 1;
-  desc.multisample.mask = 0xFFFFFFFF;
-
-  WGPURenderPipeline pipeline =
-      wgpuDeviceCreateRenderPipeline(pimpl_->device, &desc);
-  return std::make_unique<WebGPUPipeline>(pipeline);
+  return unexpected(GPUError{"Debug build"});
 }
 
 GPUResult<std::unique_ptr<CommandBuffer>> WebGPUBackend::createCommandBuffer() {
-  if (!pimpl_->ready) {
-    return std::unexpected(GPUError{"WebGPU not ready"});
-  }
-
-  return std::make_unique<WebGPUCommandBuffer>(pimpl_->device);
+  return unexpected(GPUError{"Debug build"});
 }
 
 void WebGPUBackend::submit(CommandBuffer *cmd) {

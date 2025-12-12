@@ -14,85 +14,25 @@ let gpuManager = null;
 let engineLoaded = false;
 let engineFailed = false;
 
-// Load Caption Engine WASM (Prioritize C++ Engine)
+// Load Caption Engine WASM (C++ Engine ONLY - no fallbacks)
 async function loadCaptionEngine() {
-    // Try C++ Engine first
-    const cppEngine = await loadCppCaptionEngine();
-    if (cppEngine) {
-        captionEngine = cppEngine; // Fix: Assign to global
-        engineLoaded = true;
-        console.log("✅ Using C++ Caption Engine (WASM)");
-        return cppEngine;
-    }
-
-    // Fallback logic for legacy Rust engine (if needed)
     if (engineLoaded) return captionEngine;
     if (engineFailed) return null;
 
+    // Load C++ WASM Engine
+    const cppEngine = await loadCppCaptionEngine();
+    if (cppEngine) {
+        captionEngine = cppEngine;
+        engineLoaded = true;
+        console.log("✅ C++ Caption Engine (WASM) loaded successfully!");
+        return cppEngine;
+    }
 
-    const modulePath = "/extensions/caption-live/lib/caption_engine_wasm/caption_engine.js";
-
-    return new Promise((resolve) => {
-        const timeout = setTimeout(() => {
-            console.warn("Caption Engine load timeout, using Canvas 2D fallback");
-            engineFailed = true;
-            resolve(null);
-        }, 10000);
-
-        import(modulePath)
-            .then(async (module) => {
-                clearTimeout(timeout);
-                await module.default(); // Initialize WASM
-                captionEngine = module;
-
-                try {
-                    // Initialize GPU Compute Manager
-                    if (module.WasmComputeManager) {
-                        console.log("⚡ Initializing WebGPU Compute Manager...");
-                        gpuManager = await module.WasmComputeManager.new();
-                        console.log("⚡ WebGPU Compute Manager Initialized!");
-
-                        // Load Test Effect (Liquid)
-                        const testEffect = `
-effect: "test_liquid"
-parameters:
-  intensity: float
-kernel:
-  type: "compute"
-  workgroup_size: [64, 1, 1]
-  precision: "fp32"
-  code: |
-    // Simple verification: double the input
-    output_data[index] = input_data[index] * 2.0;
-                        `;
-
-                        gpuManager.load_effect(testEffect);
-
-                        // Run a tiny test
-                        const input = new Float32Array([1.0, 2.0, 3.0, 4.0]);
-                        const params = new Float32Array([1.0]); // dummy param
-                        const result = await gpuManager.execute_effect(input, params);
-                        console.log("🌊 GPU Test Result (Should be doubled):", result);
-                    }
-                } catch (gpuError) {
-                    console.warn("⚠️ WebGPU init failed (using CPU fallback):", gpuError);
-                    // Optional: Display this error on the canvas for user visibility
-                    const ctx = document.createElement('canvas').getContext('2d');
-                    // We can't easily draw to the main canvas here without passing it, 
-                    // but the console warning is key.
-                }
-
-                engineLoaded = true;
-                console.log("🎬 Caption Engine WASM Loaded!");
-                resolve(captionEngine);
-            })
-            .catch((e) => {
-                clearTimeout(timeout);
-                console.warn("Caption Engine failed to load, using Canvas 2D fallback", e);
-                engineFailed = true;
-                resolve(null);
-            });
-    });
+    // C++ Engine failed - NO fallback available
+    console.error("❌ C++ WASM Engine failed to load! No fallback available.");
+    console.error("   Build WASM: cd core && ./build_wasm.ps1");
+    engineFailed = true;
+    return null;
 }
 
 // Build template JSON from node widgets
@@ -183,7 +123,13 @@ function buildTemplate(node, canvas, currentTime, duration) {
                     font_size: fontSize * scaleFactor,
                     color: textCol,
                     stroke_color: strokeColor,
-                    stroke_width: strokeWidth
+                    // Stroke scaling is handled by C++ Engine (Backend) automatically
+                    stroke_width: strokeWidth,
+                    outline_width: strokeWidth,
+                    outlineWidth: strokeWidth,
+                    stroke: strokeWidth,
+                    outline: strokeWidth,
+                    thickness: strokeWidth
                 },
                 position: { x: posX, y: posY },
                 animation: animation
@@ -194,33 +140,23 @@ function buildTemplate(node, canvas, currentTime, duration) {
     return JSON.stringify(template);
 }
 
-// Canvas 2D Fallback Renderer
-function renderWithCanvas2D(ctx, canvas, node, currentTime, duration) {
-    const segmentsWidget = node.widgets?.find(w => w.name === "segments");
-    const segmentsStr = segmentsWidget ? String(segmentsWidget.value) : "[]";
-    const fontSize = node.widgets?.find(w => w.name === "font_size")?.value || 50;
-    const textCol = node.widgets?.find(w => w.name === "text_color")?.value || "#FFFFFF";
-
-    ctx.fillStyle = "#1a1a2e";
+// GPU Engine Status Display (NO Canvas 2D rendering - status only)
+function displayEngineError(ctx, canvas, errorMessage) {
+    // Clear with dark background
+    ctx.fillStyle = "#0d0d1a";
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-    try {
-        const segments = JSON.parse(segmentsStr.replace(/'/g, '"'));
-        const segment = segments.find(s => currentTime >= s.start && currentTime < s.end);
-        if (segment) {
-            ctx.font = `${fontSize}px Arial`;
-            ctx.fillStyle = textCol;
-            ctx.textAlign = "center";
-            ctx.textBaseline = "middle";
-            ctx.fillText(segment.text, canvas.width / 2, canvas.height / 2);
-        }
-    } catch (e) {
-        ctx.font = "20px Arial";
-        ctx.fillStyle = "#888";
-        ctx.textAlign = "center";
-        ctx.textBaseline = "middle";
-        ctx.fillText("Preview Ready (Canvas 2D)", canvas.width / 2, canvas.height / 2);
-    }
+    // Error icon and message (minimal status display, not rendering)
+    ctx.fillStyle = "#ff4444";
+    ctx.font = "bold 14px monospace";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText("⚠️ C++ Engine Required", canvas.width / 2, canvas.height / 2 - 20);
+
+    ctx.fillStyle = "#888888";
+    ctx.font = "12px monospace";
+    ctx.fillText(errorMessage, canvas.width / 2, canvas.height / 2 + 10);
+    ctx.fillText("Build WASM: cd core && ./build_wasm.ps1", canvas.width / 2, canvas.height / 2 + 30);
 }
 
 // Main Render Loop
@@ -324,10 +260,7 @@ export function startRenderLoop(node, canvas, _OldEngine, app, getIsPlaying, isG
                     // --- GPU NODE FALLBACK (No WebGPU) ---
                     if (frameCount % 120 === 0) console.log("[Renderer] Fallback Active - Drawing warning");
 
-                    // Directly draw warning message using Canvas 2D
-                    // We don't use captionEngine here because the GPU node lacks text widgets for the template.
-
-                    // Background: Dark Blue to distinguish from "broken" black
+                    // Display WebGPU not available error (status display only, no content rendering)\n                    // GPU effects require WebGPU - when unavailable, rendering happens on server only
                     ctx.fillStyle = "#000033";
                     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
@@ -345,45 +278,33 @@ export function startRenderLoop(node, canvas, _OldEngine, app, getIsPlaying, isG
                     ctx.fillText("Rendering happens on server.", canvas.width / 2, canvas.height / 2 + 30);
                 }
             } else {
-                // --- CAPTION RENDERER (CPU/Standard) ---
+                // --- CAPTION RENDERER (C++ WASM Only) ---
                 try {
                     const templateJson = buildTemplate(node, canvas, time, duration);
 
-                    // Try rendering with C++ Engine first
+                    // Render with C++ Engine (NO fallback)
                     const success = await renderWithCppEngine(canvas, ctx, templateJson, time);
 
                     if (!success) {
-                        // Fallback to legacy Rust/JS rendering if C++ failed or not ready
-                        // (Existing legacy code logic would be here if we kept it, 
-                        //  but for now assuming C++ takes over if loaded)
-
-                        if (captionEngine && captionEngine.render_frame_rgba && !isCppEngineReady()) {
-                            // Legacy Rust path (only if C++ not ready)
-                            const rgba = captionEngine.render_frame_rgba(templateJson, time);
-                            const imageData = new ImageData(
-                                new Uint8ClampedArray(rgba),
-                                canvas.width,
-                                canvas.height
-                            );
-                            ctx.putImageData(imageData, 0, 0);
-                        }
+                        displayEngineError(ctx, canvas, "C++ Engine render failed");
                     }
                 } catch (e) {
                     console.error("Caption Engine render error:", e);
-                    renderWithCanvas2D(ctx, canvas, node, time, duration);
+                    displayEngineError(ctx, canvas, `Render Error: ${e.message}`);
                 }
             }
         } else if (engineFailed) {
-            // Fallback to Canvas 2D
-            renderWithCanvas2D(ctx, canvas, node, time, duration);
+            // NO Canvas 2D fallback - display error
+            displayEngineError(ctx, canvas, "C++ WASM Engine failed to load");
         } else {
-            // Loading state
-            ctx.fillStyle = "#1a1a2e";
+            // Loading state - minimal status display
+            ctx.fillStyle = "#0d0d1a";
             ctx.fillRect(0, 0, canvas.width, canvas.height);
-            ctx.fillStyle = "#aaa";
-            ctx.font = "16px Arial";
+            ctx.fillStyle = "#4488ff";
+            ctx.font = "14px monospace";
             ctx.textAlign = "center";
-            ctx.fillText("Loading Caption Engine...", canvas.width / 2, canvas.height / 2);
+            ctx.textBaseline = "middle";
+            ctx.fillText("⏳ Loading C++ Engine (WASM)...", canvas.width / 2, canvas.height / 2);
         }
 
         requestAnimationFrame(render);

@@ -6,17 +6,19 @@
  */
 
 #include "engine/render_pipeline.hpp"
+
+// Include full backend headers in implementation
+#include "gpu/cuda_backend.hpp"
+#include "gpu/vulkan_backend.hpp"
+#include "gpu/webgpu_backend.hpp"
 #include "text/sdf_generator.hpp"
+#include "text/sdf_text_renderer.hpp"
 
 #include <algorithm>
 #include <cstring>
 #include <iostream>
-
-
-// JSON parsing (simplified)
 #include <regex>
 #include <sstream>
-
 
 namespace CaptionEngine {
 
@@ -30,17 +32,17 @@ SceneTemplate SceneTemplate::fromJSON(const std::string &json) {
   // Simple regex-based parsing for key fields
   // In production, use nlohmann/json or rapidjson
 
-  std::regex widthRe(R"("width"\s*:\s*(\d+))");
-  std::regex heightRe(R"("height"\s*:\s*(\d+))");
-  std::regex durationRe(R"("duration"\s*:\s*([\d.]+))");
-  std::regex contentRe(R"("content"\s*:\s*"([^"]*)") ");
-      std::regex fontSizeRe(R"("font_size"\s*:\s*([\d.]+))");
-  std::regex colorRe(R"("color"\s*:\s*"([^"]*)") ");
-      std::regex posXRe(R"("x"\s*:\s*([\d.]+))");
-  std::regex posYRe(R"("y"\s*:\s*([\d.]+))");
-  std::regex animTypeRe(R"("type"\s*:\s*"([^"]*)") ");
+  std::regex widthRe("\"width\"\\s*:\\s*(\\d+)");
+  std::regex heightRe("\"height\"\\s*:\\s*(\\d+)");
+  std::regex durationRe("\"duration\"\\s*:\\s*([\\d.]+)");
+  std::regex contentRe("\"content\"\\s*:\\s*\"([^\"]*)\"");
+  std::regex fontSizeRe("\"font_size\"\\s*:\\s*([\\d.]+)");
+  std::regex colorRe("\"color\"\\s*:\\s*\"([^\"]*)\"");
+  std::regex posXRe("\"x\"\\s*:\\s*([\\d.]+)");
+  std::regex posYRe("\"y\"\\s*:\\s*([\\d.]+)");
+  std::regex animTypeRe("\"type\"\\s*:\\s*\"([^\"]*)\"");
 
-      std::smatch match;
+  std::smatch match;
 
   // Parse canvas
   if (std::regex_search(json, match, widthRe)) {

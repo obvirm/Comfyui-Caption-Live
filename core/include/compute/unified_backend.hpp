@@ -12,14 +12,15 @@
 #endif
 #endif
 
+#include "gpu/backend.hpp"
 #include <array>
 #include <cstdint>
 #include <functional>
 #include <memory>
-#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
+
 
 namespace CaptionEngine {
 namespace Compute {

@@ -6,11 +6,13 @@
 #ifdef __EMSCRIPTEN__
 
 #include "engine/engine.hpp"
+#include "gpu/backend.hpp" // Fix for libc++ rebind_pointer_t
 #include <algorithm>
 #include <emscripten/bind.h>
 #include <emscripten/val.h>
 #include <iostream>
 #include <memory>
+
 
 using namespace emscripten;
 

@@ -651,7 +651,7 @@ bool VulkanBackend::isReady() const { return pimpl_->ready; }
 GPUResult<std::unique_ptr<Buffer>>
 VulkanBackend::createBuffer(size_t size, BufferUsage usage) {
   if (!pimpl_->ready) {
-    return std::unexpected(GPUError{"Vulkan not ready"});
+    return unexpected(GPUError{"Vulkan not ready"});
   }
   return std::make_unique<VulkanBuffer>(pimpl_->device, pimpl_->physicalDevice,
                                         size, usage);
@@ -661,7 +661,7 @@ GPUResult<std::unique_ptr<Texture>>
 VulkanBackend::createTexture(uint32_t width, uint32_t height,
                              TextureFormat format) {
   if (!pimpl_->ready) {
-    return std::unexpected(GPUError{"Vulkan not ready"});
+    return unexpected(GPUError{"Vulkan not ready"});
   }
   return std::make_unique<VulkanTexture>(pimpl_->device, pimpl_->physicalDevice,
                                          width, height, format);
@@ -671,7 +671,7 @@ GPUResult<std::unique_ptr<Shader>>
 VulkanBackend::createShaderWGSL(const std::string &source, ShaderStage stage,
                                 const std::string &entryPoint) {
   // Vulkan doesn't support WGSL directly, need SPIR-V
-  return std::unexpected(GPUError{"WGSL not supported in Vulkan, use SPIR-V"});
+  return unexpected(GPUError{"WGSL not supported in Vulkan, use SPIR-V"});
 }
 
 GPUResult<std::unique_ptr<Shader>>
@@ -679,7 +679,7 @@ VulkanBackend::createShaderSPIRV(std::span<const uint32_t> spirv,
                                  ShaderStage stage,
                                  const std::string &entryPoint) {
   if (!pimpl_->ready) {
-    return std::unexpected(GPUError{"Vulkan not ready"});
+    return unexpected(GPUError{"Vulkan not ready"});
   }
   return std::make_unique<VulkanShader>(pimpl_->device, spirv, stage,
                                         entryPoint);
@@ -688,7 +688,7 @@ VulkanBackend::createShaderSPIRV(std::span<const uint32_t> spirv,
 GPUResult<std::unique_ptr<Pipeline>>
 VulkanBackend::createComputePipeline(Shader *computeShader) {
   if (!pimpl_->ready) {
-    return std::unexpected(GPUError{"Vulkan not ready"});
+    return unexpected(GPUError{"Vulkan not ready"});
   }
 
   auto *shader = static_cast<VulkanShader *>(computeShader);
@@ -700,7 +700,7 @@ VulkanBackend::createComputePipeline(Shader *computeShader) {
   VkPipelineLayout layout;
   if (vkCreatePipelineLayout(pimpl_->device, &layoutInfo, nullptr, &layout) !=
       VK_SUCCESS) {
-    return std::unexpected(GPUError{"Failed to create pipeline layout"});
+    return unexpected(GPUError{"Failed to create pipeline layout"});
   }
 
   // Create compute pipeline
@@ -717,7 +717,7 @@ VulkanBackend::createComputePipeline(Shader *computeShader) {
   if (vkCreateComputePipelines(pimpl_->device, VK_NULL_HANDLE, 1, &pipelineInfo,
                                nullptr, &pipeline) != VK_SUCCESS) {
     vkDestroyPipelineLayout(pimpl_->device, layout, nullptr);
-    return std::unexpected(GPUError{"Failed to create compute pipeline"});
+    return unexpected(GPUError{"Failed to create compute pipeline"});
   }
 
   return std::make_unique<VulkanPipeline>(pimpl_->device, pipeline, layout,
@@ -727,16 +727,16 @@ VulkanBackend::createComputePipeline(Shader *computeShader) {
 GPUResult<std::unique_ptr<Pipeline>> VulkanBackend::createRenderPipeline(
     Shader *vertexShader, Shader *fragmentShader, TextureFormat outputFormat) {
   if (!pimpl_->ready) {
-    return std::unexpected(GPUError{"Vulkan not ready"});
+    return unexpected(GPUError{"Vulkan not ready"});
   }
 
   // TODO: Implement render pipeline creation with dynamic rendering
-  return std::unexpected(GPUError{"Render pipeline not yet implemented"});
+  return unexpected(GPUError{"Render pipeline not yet implemented"});
 }
 
 GPUResult<std::unique_ptr<CommandBuffer>> VulkanBackend::createCommandBuffer() {
   if (!pimpl_->ready) {
-    return std::unexpected(GPUError{"Vulkan not ready"});
+    return unexpected(GPUError{"Vulkan not ready"});
   }
   return std::make_unique<VulkanCommandBuffer>(pimpl_->device,
                                                pimpl_->commandPool);

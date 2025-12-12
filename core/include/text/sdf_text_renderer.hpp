@@ -8,21 +8,17 @@
  */
 
 #include "gpu/backend.hpp"
+#include "text/types.hpp" // Shared TextStyle, TextAlign
 #include <glm/glm.hpp>
 #include <string>
 #include <unordered_map>
 
-
 namespace CaptionEngine {
 namespace Text {
 
-/// Glyph metrics
-struct GlyphMetrics {
-  uint32_t atlasX, atlasY;  ///< Position in SDF atlas
-  uint32_t width, height;   ///< Size in atlas
-  float bearingX, bearingY; ///< Offset from origin
-  float advance;            ///< Horizontal advance
-};
+/// Glyph metrics (also defined in sdf_generator.hpp - use that one)
+// Forward declaration - full definition in sdf_generator.hpp
+struct GlyphMetrics;
 
 /// Font configuration
 struct FontConfig {
@@ -61,17 +57,7 @@ private:
   std::unique_ptr<Impl> pimpl_;
 };
 
-/// Text alignment
-enum class TextAlign { Left, Center, Right };
-
-/// Text style
-struct TextStyle {
-  glm::vec4 color = glm::vec4(1.0f);        ///< RGBA
-  glm::vec4 outlineColor = glm::vec4(0.0f); ///< Outline RGBA
-  float outlineWidth = 0.0f;                ///< Outline size
-  float fontSize = 48.0f;                   ///< Display size
-  TextAlign align = TextAlign::Center;
-};
+// Use shared TextStyle and TextAlign from text/types.hpp
 
 /**
  * @brief GPU Text Renderer

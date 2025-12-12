@@ -8,11 +8,31 @@
 
 #include "gpu/backend.hpp"
 
+// Check if Vulkan SDK is available
+#if __has_include(<vulkan/vulkan.h>)
+#define CE_HAS_VULKAN 1
+
 #ifdef _WIN32
 #define VK_USE_PLATFORM_WIN32_KHR
 #endif
 
 #include <vulkan/vulkan.h>
+#else
+#define CE_HAS_VULKAN 0
+// Stub types for compilation without Vulkan SDK
+typedef void *VkInstance;
+typedef void *VkDevice;
+typedef void *VkPhysicalDevice;
+typedef void *VkQueue;
+typedef void *VkCommandPool;
+typedef void *VkBuffer;
+typedef void *VkImage;
+typedef void *VkShaderModule;
+typedef void *VkPipeline;
+typedef void *VkCommandBuffer;
+typedef void *VkFence;
+typedef void *VkSemaphore;
+#endif
 
 namespace CaptionEngine {
 namespace GPU {

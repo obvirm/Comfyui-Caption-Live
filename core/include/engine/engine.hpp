@@ -4,12 +4,14 @@
  * @brief Core Caption Engine interface
  */
 
+#include "gpu/backend.hpp" // Fix for libc++ rebind_pointer_t
 #include <cstdint>
 #include <functional>
 #include <memory>
 #include <optional>
 #include <string>
 #include <vector>
+
 
 namespace CaptionEngine {
 

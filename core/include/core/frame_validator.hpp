@@ -5,9 +5,9 @@
 
 #pragma once
 
+#include "gpu/backend.hpp"
 #include <array>
 #include <cstdint>
-#include <span>
 #include <string>
 #include <vector>
 
@@ -61,7 +61,11 @@ public:
     uint32_t height;
     uint32_t channels;
 
-    bool operator==(const FrameHash &) const = default;
+    bool operator==(const FrameHash &other) const {
+      return data_hash == other.data_hash &&
+             metadata_hash == other.metadata_hash;
+    }
+    bool operator!=(const FrameHash &other) const { return !(*this == other); }
   };
 
   /// Compute comprehensive frame hash

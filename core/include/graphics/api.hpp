@@ -10,11 +10,12 @@
  * - Metal (macOS/iOS)
  */
 
+#include "gpu/backend.hpp"
 #include <cstdint>
 #include <memory>
-#include <span>
 #include <string>
 #include <vector>
+
 
 namespace CaptionEngine::Graphics {
 
