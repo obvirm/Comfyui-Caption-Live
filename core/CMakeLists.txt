@@ -105,7 +105,7 @@ endif()
 # =============================================================================
 # Skia Graphics Engine (Optional - for high-quality text rendering)
 # =============================================================================
-option(ENABLE_SKIA "Enable Skia for high-quality text rendering" OFF)  # TEMP: Disabled due to runtime library mismatch
+option(ENABLE_SKIA "Enable Skia for high-quality text rendering" ON)
 set(SKIA_ROOT "E:/skia" CACHE PATH "Path to Skia source root")
 set(SKIA_OUT_DIR "${SKIA_ROOT}/out/Release" CACHE PATH "Path to Skia build output")
 
