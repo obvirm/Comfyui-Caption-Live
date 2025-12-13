@@ -46,8 +46,9 @@ skia/
 *.log
 init_error.log
 
-# Compiled binaries (keep .pyd in root for distribution)
+# Compiled binaries
 core/build/
+*.pyd
 core/*.pyd
 lib/**/*.pyd
 

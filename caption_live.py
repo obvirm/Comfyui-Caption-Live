@@ -97,11 +97,43 @@ class CaptionLiveNode:
         """Build template JSON for caption_engine"""
         # Parse segments
         segments = []
+        # Parse segments with WhisperX support
+        segments = []
         try:
-            parsed = json.loads(segments_str.replace("'", '"'))
-            if isinstance(parsed, list) and len(parsed) > 0:
-                segments = parsed
-        except:
+            # Handle potential single quotes from some inputs
+            cleaned_str = segments_str.replace("'", '"')
+            parsed = json.loads(cleaned_str)
+
+            final_segments = []
+            
+            # Handle full WhisperX object (root has "segments")
+            if isinstance(parsed, dict) and "segments" in parsed:
+                parsed = parsed["segments"]
+
+            # Process list of segments/words
+            if isinstance(parsed, list):
+                for item in parsed:
+                    # Priority: Extract "words" if available (Word-Level Timing)
+                    if "words" in item and isinstance(item["words"], list):
+                        for word in item["words"]:
+                            final_segments.append({
+                                "text": word.get("word", "").strip(),
+                                "start": float(word.get("start", 0)),
+                                "end": float(word.get("end", 0))
+                            })
+                    # Fallback: Use segment text if no words array
+                    elif "text" in item and "start" in item:
+                        final_segments.append({
+                            "text": item.get("text", "").strip(),
+                            "start": float(item.get("start", 0)),
+                            "end": float(item.get("end", 0))
+                        })
+            
+            if final_segments:
+                segments = final_segments
+
+        except Exception as e:
+            print(f"⚠️ JSON Parse Warning: {e}")
             pass
         
         # If segments empty, build from text words (same as frontend)
@@ -136,7 +168,8 @@ class CaptionLiveNode:
         # Font scaling - same as frontend (relative to 1080p height)
         scale_factor = height / 1080.0
         scaled_font_size = font_size * scale_factor
-        scaled_stroke_width = max(1.5, stroke_width * scale_factor) # Ensure visibility and scaling parity
+        # Scale stroke_width proportionally with font for visual consistency
+        scaled_stroke_width = stroke_width * scale_factor
         
         # Build content from segments (same as frontend)
         content = " ".join([s.get("text", "") for s in segments]) if segments else text
@@ -153,7 +186,7 @@ class CaptionLiveNode:
                     "font_path": font_path if font_path else None,
                     "color": text_color,
                     "stroke_color": stroke_color,
-                    "stroke_width": scaled_stroke_width
+                    "stroke_width": scaled_stroke_width  # Pre-scaled, C++ won't scale again
                 },
                 "position": {"x": pos_x, "y": pos_y},
                 "animation": animation

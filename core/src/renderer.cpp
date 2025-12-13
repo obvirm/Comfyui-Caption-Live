@@ -14,6 +14,20 @@ namespace CaptionEngine {
 // Forward declaration for text renderer (defined in text_renderer.cpp)
 void draw_text_to_buffer(ImageBuffer &img, const std::string &text, float x,
                          float y, float font_size, uint32_t color);
+float measure_text_width(const std::string &text, float font_size);
+
+// Forward declarations for Skia text renderer (defined in
+// skia_text_renderer.cpp)
+#ifdef CE_HAS_SKIA
+extern void
+skia_draw_text_with_stroke(ImageBuffer &img, const std::string &text, float x,
+                           float y, float font_size, uint32_t text_color,
+                           uint32_t stroke_color, float stroke_width);
+extern void skia_draw_text_to_buffer(ImageBuffer &img, const std::string &text,
+                                     float x, float y, float font_size,
+                                     uint32_t color);
+extern bool skia_init_font(const std::string &font_path);
+#endif
 
 // Helper: Parse hex color to RGBA
 static uint32_t parse_hex_color(const std::string &hex) {
@@ -183,22 +197,38 @@ void Renderer::render_text_layer(ImageBuffer &img, const TextLayer &layer,
   if (auto *box_anim = std::get_if<BoxHighlightAnimation>(&layer.animation)) {
     if (state.show_box && state.active_segment) {
       uint32_t box_color = parse_hex_color(box_anim->box_color);
-      float scale_factor = img.height / 1080.0f;
 
-      // Auto-scale box parameters
+      // FIXED 1080p BASELINE SCALING
+      // Box parameters are designed for 1080p baseline.
+      // Font is pre-scaled by Python/JS, so box should match.
+      // This ensures: Preview (any resolution) = Output (any resolution)
+      float scale_factor = 1.0f; // Fixed baseline, no dynamic scaling
+
+      // Apply fixed baseline scaling to box parameters
       float scaled_padding = box_anim->box_padding * scale_factor;
       float scaled_radius = box_anim->box_radius * scale_factor;
 
-      float word_width = layer.style.font_size * 3;
-      float word_height = layer.style.font_size;
+      std::string segment_text = "";
+      if (state.active_segment &&
+          *state.active_segment < box_anim->segments.size()) {
+        segment_text = box_anim->segments[*state.active_segment].text;
+      }
 
-      int box_x = static_cast<int>(x - word_width / 2 - scaled_padding);
-      int box_y = static_cast<int>(y - word_height / 2 - scaled_padding);
+      float word_width =
+          measure_text_width(segment_text, layer.style.font_size);
+      float word_height = layer.style.font_size; // Height is roughly 1em
 
-      draw_rounded_rect(img, box_x, box_y,
-                        static_cast<uint32_t>(word_width + scaled_padding * 2),
-                        static_cast<uint32_t>(word_height + scaled_padding * 2),
-                        scaled_radius, box_color);
+      int box_x =
+          static_cast<int>(std::round(x - word_width / 2 - scaled_padding));
+      int box_y = static_cast<int>(
+          std::round(y - word_height / 2 - scaled_padding +
+                     word_height * 0.1f)); // Adjust for baseline
+
+      draw_rounded_rect(
+          img, box_x, box_y,
+          static_cast<uint32_t>(std::round(word_width + scaled_padding * 2)),
+          static_cast<uint32_t>(std::round(word_height + scaled_padding * 2)),
+          scaled_radius, box_color);
     }
   }
 
@@ -207,9 +237,12 @@ void Renderer::render_text_layer(ImageBuffer &img, const TextLayer &layer,
   float text_draw_y = y - layer.style.font_size / 2.0f;
 
   if (layer.style.stroke_width > 0) {
-    // Auto-scale stroke width based on resolution (Baseline: 1080p)
-    // This ensures 4px stroke looks proportional on 4K (scales to ~8px)
-    float scale_factor = img.height / 1080.0f;
+    // FIXED 1080p BASELINE SCALING
+    // stroke_width is already proportionally designed for 1080p baseline.
+    // Font is pre-scaled by Python/JS before being sent to C++ engine.
+    // Stroke should use the SAME baseline to match preview with output.
+    // This ensures: Preview (any resolution) = Output (any resolution)
+    float scale_factor = 1.0f; // Fixed baseline, no dynamic scaling
     float scaled_stroke = layer.style.stroke_width * scale_factor;
 
     // Ensure minimum visibility (at least 1px if stroke is defined)
@@ -240,19 +273,61 @@ void Renderer::draw_text_with_stroke(ImageBuffer &img, const std::string &text,
                                      float x, float y, float font_size,
                                      uint32_t text_color, uint32_t stroke_color,
                                      float stroke_width) {
-  int radius = static_cast<int>(std::ceil(stroke_width));
+#ifdef CE_HAS_SKIA
+  // Use Skia for high-quality anti-aliased text rendering
+  skia_draw_text_with_stroke(img, text, x, y, font_size, text_color,
+                             stroke_color, stroke_width);
+#else
+  // Fallback: Anti-aliased stroke rendering using distance-weighted alpha
+  // This provides smooth edges instead of pixelated jagged stroke
 
-  for (int dy = -radius; dy <= radius; ++dy) {
-    for (int dx = -radius; dx <= radius; ++dx) {
+  float radius = stroke_width;
+  int max_offset =
+      static_cast<int>(std::ceil(radius)) + 1; // +1 for anti-aliasing
+
+  // Extract stroke color components
+  uint8_t sr = (stroke_color >> 24) & 0xFF;
+  uint8_t sg = (stroke_color >> 16) & 0xFF;
+  uint8_t sb = (stroke_color >> 8) & 0xFF;
+  uint8_t sa = stroke_color & 0xFF;
+
+  // Draw stroke passes with distance-based alpha falloff
+  // Inner passes are fully opaque, outer edge has smooth falloff
+  for (int dy = -max_offset; dy <= max_offset; ++dy) {
+    for (int dx = -max_offset; dx <= max_offset; ++dx) {
       if (dx == 0 && dy == 0)
+        continue; // Skip center (will be drawn as text)
+
+      float distance = std::sqrt(static_cast<float>(dx * dx + dy * dy));
+
+      // Skip if outside stroke radius + anti-alias zone
+      if (distance > radius + 1.0f)
         continue;
-      if (dx * dx + dy * dy > radius * radius)
+
+      // Calculate alpha based on distance from stroke edge
+      // Full opacity inside stroke, smooth falloff at edge
+      float alpha_factor = 1.0f;
+      if (distance > radius - 0.5f) {
+        // Anti-alias zone: smooth falloff in the last 1.5 pixels
+        alpha_factor =
+            std::clamp(1.0f - (distance - radius + 0.5f) / 1.5f, 0.0f, 1.0f);
+      }
+
+      if (alpha_factor <= 0.0f)
         continue;
-      draw_text(img, text, x + dx, y + dy, font_size, stroke_color);
+
+      // Calculate adjusted stroke color with distance-based alpha
+      uint8_t adjusted_alpha = static_cast<uint8_t>(sa * alpha_factor);
+      uint32_t adjusted_color =
+          (sr << 24) | (sg << 16) | (sb << 8) | adjusted_alpha;
+
+      draw_text(img, text, x + dx, y + dy, font_size, adjusted_color);
     }
   }
 
+  // Draw the main text on top
   draw_text(img, text, x, y, font_size, text_color);
+#endif // CE_HAS_SKIA
 }
 
 void Renderer::draw_rounded_rect(ImageBuffer &img, int x, int y, uint32_t w,

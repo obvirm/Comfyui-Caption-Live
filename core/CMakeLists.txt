@@ -102,6 +102,59 @@ if(ENABLE_UNIFIED_PIPELINE)
     endif()
 endif()
 
+# =============================================================================
+# Skia Graphics Engine (Optional - for high-quality text rendering)
+# =============================================================================
+option(ENABLE_SKIA "Enable Skia for high-quality text rendering" OFF)  # TEMP: Disabled due to runtime library mismatch
+set(SKIA_ROOT "E:/skia" CACHE PATH "Path to Skia source root")
+set(SKIA_OUT_DIR "${SKIA_ROOT}/out/Release" CACHE PATH "Path to Skia build output")
+
+if(ENABLE_SKIA AND NOT EMSCRIPTEN)
+    # Check if manually built Skia exists
+    if(EXISTS "${SKIA_OUT_DIR}/skia.lib")
+        target_sources(caption_engine PRIVATE
+            src/text/skia_text_renderer.cpp
+        )
+        
+        # Link Skia libraries (manually built)
+        target_link_libraries(caption_engine PRIVATE
+            ${SKIA_OUT_DIR}/skia.lib
+            ${SKIA_OUT_DIR}/harfbuzz.lib
+            ${SKIA_OUT_DIR}/skcms.lib
+        )
+        
+        # Skia include directories
+        target_include_directories(caption_engine PRIVATE
+            ${SKIA_ROOT}
+            ${SKIA_ROOT}/include
+        )
+        
+        target_compile_definitions(caption_engine PUBLIC 
+            CE_HAS_SKIA=1
+            CAPTION_HAS_SKIA=1
+            SK_BUILD_FOR_WIN=1
+            NOMINMAX
+        )
+        
+        # Windows-specific libs needed by Skia
+        if(WIN32)
+            target_link_libraries(caption_engine PRIVATE
+                opengl32
+                user32
+                gdi32
+            )
+        endif()
+        
+        message(STATUS "╔═══════════════════════════════════════════════════╗")
+        message(STATUS "║  Skia Graphics Engine ENABLED (Manual Build)      ║")
+        message(STATUS "║  High-quality anti-aliased text rendering         ║")
+        message(STATUS "╚═══════════════════════════════════════════════════╝")
+    else()
+        message(STATUS "Skia not found at ${SKIA_OUT_DIR} - using stb_truetype fallback")
+        message(STATUS "  Build Skia: cd ${SKIA_ROOT} && gn gen out/Release && ninja -C out/Release")
+    endif()
+endif()
+
 target_include_directories(caption_engine PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )

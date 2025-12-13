@@ -53,11 +53,46 @@ function buildTemplate(node, canvas, currentTime, duration) {
     const posX = node.widgets?.find(w => w.name === "pos_x")?.value || 0.5;
     const posY = node.widgets?.find(w => w.name === "pos_y")?.value || 0.8;
 
-    // Parse segments
+    // Parse segments with WhisperX support
     let segments = [];
     try {
-        segments = JSON.parse(segmentsStr.replace(/'/g, '"'));
+        let parsed = JSON.parse(segmentsStr.replace(/'/g, '"'));
+
+        let finalSegments = [];
+
+        // Handle full WhisperX object (root has "segments")
+        if (parsed && !Array.isArray(parsed) && parsed.segments) {
+            parsed = parsed.segments;
+        }
+
+        if (Array.isArray(parsed)) {
+            parsed.forEach(item => {
+                // Priority: Extract "words" if available (Word-Level Timing)
+                if (item.words && Array.isArray(item.words)) {
+                    item.words.forEach(w => {
+                        finalSegments.push({
+                            text: w.word ? w.word.trim() : "",
+                            start: parseFloat(w.start || 0),
+                            end: parseFloat(w.end || 0)
+                        });
+                    });
+                }
+                // Fallback: Use segment text if no words array
+                else if (item.text && item.start !== undefined) {
+                    finalSegments.push({
+                        text: item.text ? item.text.trim() : "",
+                        start: parseFloat(item.start || 0),
+                        end: parseFloat(item.end || 0)
+                    });
+                }
+            });
+        }
+
+        if (finalSegments.length > 0) {
+            segments = finalSegments;
+        }
     } catch (e) {
+        console.warn("JSON Parse Warning:", e);
         segments = [];
     }
 
@@ -111,6 +146,9 @@ function buildTemplate(node, canvas, currentTime, duration) {
     // 9:16 (1920h) -> 1.77x (Text grows for vertical video, typical for TikTok)
     const scaleFactor = canvas.height / 1080.0;
 
+    // Scale stroke proportionally with font for visual consistency
+    const scaledStrokeWidth = strokeWidth * scaleFactor;
+
     const template = {
         canvas: { width: canvas.width, height: canvas.height },
         duration: duration,
@@ -123,13 +161,13 @@ function buildTemplate(node, canvas, currentTime, duration) {
                     font_size: fontSize * scaleFactor,
                     color: textCol,
                     stroke_color: strokeColor,
-                    // Stroke scaling is handled by C++ Engine (Backend) automatically
-                    stroke_width: strokeWidth,
-                    outline_width: strokeWidth,
-                    outlineWidth: strokeWidth,
-                    stroke: strokeWidth,
-                    outline: strokeWidth,
-                    thickness: strokeWidth
+                    // Pre-scaled stroke, C++ engine uses fixed baseline (1.0)
+                    stroke_width: scaledStrokeWidth,
+                    outline_width: scaledStrokeWidth,
+                    outlineWidth: scaledStrokeWidth,
+                    stroke: scaledStrokeWidth,
+                    outline: scaledStrokeWidth,
+                    thickness: scaledStrokeWidth
                 },
                 position: { x: posX, y: posY },
                 animation: animation

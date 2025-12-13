@@ -10,7 +10,6 @@
 #include <variant>
 #include <vector>
 
-
 namespace CaptionEngine {
 
 /// Canvas dimensions
