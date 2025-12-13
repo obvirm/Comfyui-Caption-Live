@@ -185,9 +185,9 @@ void skia_draw_text_with_stroke(ImageBuffer &img, const std::string &text,
 
   SkCanvas *canvas = surface->getCanvas();
 
-  // Setup font with subpixel anti-aliasing
+  // Setup font with standard anti-aliasing (better for transparent backgrounds)
   SkFont font(g_skia_typeface, font_size);
-  font.setEdging(SkFont::Edging::kSubpixelAntiAlias);
+  font.setEdging(SkFont::Edging::kAntiAlias);
   font.setSubpixel(true);
 
   // Center text
